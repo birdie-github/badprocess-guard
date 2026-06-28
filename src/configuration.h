@@ -18,6 +18,10 @@ public:
     QPoint windowPosition() const { return m_windowPosition; }
     bool hasWindowPosition() const { return m_hasWindowPosition; }
     bool allWorkspaces() const { return m_allWorkspaces; }
+    int refreshInterval() const { return m_refreshInterval; }
+    int alertDuration() const { return m_alertDuration; }
+    double treeThresholdPercent() const { return m_treeThresholdPercent; }
+    double processThresholdPercent() const { return m_processThresholdPercent; }
 
 public slots:
     void setOpacityPercent(int value);
@@ -42,4 +46,8 @@ private:
     QPoint m_windowPosition;
     bool m_hasWindowPosition = false;
     bool m_allWorkspaces = false;
+    int m_refreshInterval = 5000;
+    int m_alertDuration = 3000;
+    double m_treeThresholdPercent = 50.0;
+    double m_processThresholdPercent = 50.0;
 };

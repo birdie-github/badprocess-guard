@@ -11,36 +11,45 @@ Configuration::Configuration(QObject *parent)
 }
 
 void Configuration::load() {
-    m_opacityPercent = qBound(10, m_settings.value(QStringLiteral("appearance/opacityPercent"), 50).toInt(), 100);
-    m_darkMode = m_settings.value(QStringLiteral("appearance/darkMode"), true).toBool();
-    m_useCustomFont = m_settings.value(QStringLiteral("appearance/useCustomFont"), false).toBool();
-    // Default to false.  Enabling the X11 sticky-workspace hint should be an
-    // explicit user choice, not something that changes window placement merely
-    // because the program was upgraded.
-    m_allWorkspaces = m_settings.value(QStringLiteral("window/AllWorkspaces"),
-                                       m_settings.value(QStringLiteral("AllWorkspaces"), false)).toBool();
+    m_settings.beginGroup(QStringLiteral("General"));
 
-    const QString fontString = m_settings.value(QStringLiteral("appearance/customFont")).toString();
-    if (!fontString.isEmpty())
+    m_opacityPercent = qBound(10, m_settings.value(QStringLiteral("Opacity"), 50).toInt(), 100);
+    m_darkMode = m_settings.value(QStringLiteral("DarkMode"), true).toBool();
+    m_allWorkspaces = m_settings.value(QStringLiteral("AllWorkspaces"), false).toBool();
+    m_refreshInterval = qMax(250, m_settings.value(QStringLiteral("RefreshInterval"), 5000).toInt());
+    m_alertDuration = qMax(0, m_settings.value(QStringLiteral("AlertDuration"), 3000).toInt());
+    m_treeThresholdPercent = qMax(0.0, m_settings.value(QStringLiteral("TreeThreshold"), 50.0).toDouble());
+    m_processThresholdPercent = qMax(0.0, m_settings.value(QStringLiteral("ProcessThreshold"), 50.0).toDouble());
+
+    const QString fontString = m_settings.value(QStringLiteral("Font")).toString();
+    m_useCustomFont = !fontString.isEmpty();
+    if (m_useCustomFont)
         m_customFont.fromString(fontString);
 
-    if (m_settings.contains(QStringLiteral("window/x")) && m_settings.contains(QStringLiteral("window/y"))) {
-        m_windowPosition = QPoint(m_settings.value(QStringLiteral("window/x")).toInt(),
-                                  m_settings.value(QStringLiteral("window/y")).toInt());
+    if (m_settings.contains(QStringLiteral("WindowX")) && m_settings.contains(QStringLiteral("WindowY"))) {
+        m_windowPosition = QPoint(m_settings.value(QStringLiteral("WindowX")).toInt(),
+                                  m_settings.value(QStringLiteral("WindowY")).toInt());
         m_hasWindowPosition = true;
     }
+
+    m_settings.endGroup();
 }
 
 void Configuration::save() {
-    m_settings.setValue(QStringLiteral("appearance/opacityPercent"), m_opacityPercent);
-    m_settings.setValue(QStringLiteral("appearance/darkMode"), m_darkMode);
-    m_settings.setValue(QStringLiteral("appearance/useCustomFont"), m_useCustomFont);
-    m_settings.setValue(QStringLiteral("appearance/customFont"), m_customFont.toString());
-    m_settings.setValue(QStringLiteral("window/AllWorkspaces"), m_allWorkspaces);
+    m_settings.beginGroup(QStringLiteral("General"));
+    m_settings.setValue(QStringLiteral("Opacity"), m_opacityPercent);
+    m_settings.setValue(QStringLiteral("DarkMode"), m_darkMode);
+    m_settings.setValue(QStringLiteral("Font"), m_useCustomFont ? m_customFont.toString() : QString());
+    m_settings.setValue(QStringLiteral("AllWorkspaces"), m_allWorkspaces);
+    m_settings.setValue(QStringLiteral("RefreshInterval"), m_refreshInterval);
+    m_settings.setValue(QStringLiteral("AlertDuration"), m_alertDuration);
+    m_settings.setValue(QStringLiteral("TreeThreshold"), m_treeThresholdPercent);
+    m_settings.setValue(QStringLiteral("ProcessThreshold"), m_processThresholdPercent);
     if (m_hasWindowPosition) {
-        m_settings.setValue(QStringLiteral("window/x"), m_windowPosition.x());
-        m_settings.setValue(QStringLiteral("window/y"), m_windowPosition.y());
+        m_settings.setValue(QStringLiteral("WindowX"), m_windowPosition.x());
+        m_settings.setValue(QStringLiteral("WindowY"), m_windowPosition.y());
     }
+    m_settings.endGroup();
     m_settings.sync();
 }
 
@@ -70,9 +79,10 @@ void Configuration::setUseCustomFont(bool enabled) {
 }
 
 void Configuration::setCustomFont(const QFont &font) {
-    if (m_customFont == font)
+    if (m_useCustomFont && m_customFont == font)
         return;
     m_customFont = font;
+    m_useCustomFont = true;
     save();
     emit changed();
 }

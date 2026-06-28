@@ -108,7 +108,7 @@ void ProcessMonitor::sampleInternal(bool honorLinger) {
                            .arg(process.cpuPercent, 0, 'f', 1)
                            .arg(process.processCount);
         }
-        qInfo().noquote() << QStringLiteral("badprocess-guard: sample: %1 processes scanned, elapsed=%2s, linger=%3 ms, honor-linger=%4, bad=[%5]")
+        qInfo().noquote() << QStringLiteral("badprocess-guard: sample: %1 processes scanned, elapsed=%2s, alert-duration=%3 ms, honor-duration=%4, bad=[%5]")
                              .arg(current.size())
                              .arg(elapsed, 0, 'f', 3)
                              .arg(m_lingerMs)

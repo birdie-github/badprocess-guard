@@ -1,11 +1,16 @@
 # badprocess-guard
 
-A small Qt Widgets desktop guard for Linux CPU-heavy processes.
+A small Qt Widgets desktop guard for CPU-heavy process trees.
 
-It uses Linux `/proc` CPU accounting. Every sample is treated as current state:
-if a watched process tree or an individual process is above threshold, the
-compact frameless translucent overlay appears immediately; when nothing is above
-threshold, it disappears.
+On Linux it uses `/proc` CPU accounting. On Windows it uses the Win32 process
+snapshot and process-time APIs. CPU percentages use the same semantics on both
+platforms: 100% means one fully busy logical CPU, 200% means two logical CPUs,
+and so on.
+
+Every sample is treated as current state: if a watched process tree or an
+individual process is above threshold, the compact frameless translucent overlay
+appears immediately; when nothing is above threshold, it disappears after the
+configured alert duration.
 
 Watched trees are configured in `process-mapping.ini`, not hardcoded in the UI.
 A watched tree is shown as one compact line for the root process, with CPU usage
@@ -14,12 +19,12 @@ individually.
 
 The stop button opens a confirmation dialog with:
 
-- Terminate = `SIGTERM`
-- Kill -9 = `SIGKILL`
+- Linux: Terminate = `SIGTERM`, Kill -9 = `SIGKILL`
+- Windows: termination uses `TerminateProcess`
 - Cancel
 
 After Terminate or Kill -9, the monitor performs immediate refreshes that bypass
-both the normal sampling interval and the linger duration.
+both the normal sampling interval and the alert duration.
 
 Settings are stored in:
 
@@ -27,18 +32,28 @@ Settings are stored in:
 ~/.config/badprocess-guard/badprocess-guard.ini
 ```
 
-Useful setting without UI:
+The configuration schema is intentionally clean and flat:
 
 ```ini
-[window]
-AllWorkspaces=true
+[General]
+RefreshInterval=5000
+AlertDuration=3000
+Opacity=50
+DarkMode=true
+Font=
+AllWorkspaces=false
+TreeThreshold=50
+ProcessThreshold=50
 ```
 
-On X11/XFCE this applies the `_NET_WM_STATE_STICKY` EWMH state so the alert
-window appears on all workspaces. On Wayland this is not available generically.
+`RefreshInterval` and `AlertDuration` are milliseconds.
 
-The default is `false`; enable it explicitly only if your window manager handles
-sticky tool windows correctly.
+`Font=` empty means the application default font is used. A non-empty Qt font
+string enables the custom font.
+
+`AllWorkspaces` is Linux/X11-only. On X11/XFCE this applies the
+`_NET_WM_STATE_STICKY` EWMH state so the alert window appears on all workspaces.
+On Wayland and Windows it is ignored. The default is `false`.
 
 ## Build
 
@@ -62,29 +77,25 @@ cmake --build build-qt6 -j$(nproc)
 ./build/badprocess-guard
 ```
 
+Useful overrides:
+
+```bash
+./build/badprocess-guard --refresh-interval 1500 --alert-duration 3000
+./build/badprocess-guard --debug --tree-threshold 1 --process-threshold 1
+./build/badprocess-guard --test-alert
+```
+
 ## Defaults
 
-- Sample interval: 5 seconds
+- Refresh interval: 5000 ms
+- Alert duration after a normal sample: 3000 ms
 - Watched-tree CPU threshold: 50%
 - Individual-process CPU threshold: 50%
-- Linger duration after a normal sample: 3000 ms
 - Overlay opacity: 50%
 - Minimum configurable opacity: 10%
 - All X11 workspaces: disabled by default
 
-CPU percentages are not divided by CPU count. 100% means one fully busy logical
-CPU; 200% means two logical CPUs, and so on.
-
 ## Debugging
-
-Useful commands:
-
-```sh
-./build/badprocess-guard --debug
-./build/badprocess-guard --debug --tree-threshold 1 --process-threshold 1
-./build/badprocess-guard --interval-ms 1000 --linger-ms 3000
-./build/badprocess-guard --test-alert
-```
 
 `--debug` prints snapshots, watched roots, aggregate tree CPU percentages,
 individual bad processes, and the current bad-process list to stderr.
@@ -129,19 +140,3 @@ The visible HUD row is intentionally compact:
 
 No title, no `PID`/`CPU` labels, and no command-line arguments in the visible
 text. Full details remain available in the tooltip and termination dialog.
-
-
-Windows notes
--------------
-
-The UI builds on Windows via Qt Widgets.  The Windows monitor backend uses
-ToolHelp process enumeration and GetProcessTimes().  CPU percentages intentionally
-match the Linux semantics: 100% means one fully busy logical CPU, 200% means two,
-and so on.  They are not normalized the way Windows Task Manager usually presents
-process CPU as a fraction of total machine capacity.
-
-The `AllWorkspaces` setting is X11/Linux-only and is ignored on Windows.
-Windows windows are still created as always-on-top via Qt.
-
-Windows has no direct SIGTERM equivalent here; both Terminate and Kill use
-TerminateProcess() for now.

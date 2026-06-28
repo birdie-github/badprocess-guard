@@ -15,18 +15,18 @@ int main(int argc, char **argv) {
     parser.setApplicationDescription(QStringLiteral("Compact guard window for CPU-heavy process trees."));
     parser.addHelpOption();
 
-    QCommandLineOption intervalOpt(QStringLiteral("interval-ms"),
+    QCommandLineOption intervalOpt(QStringLiteral("refresh-interval"),
                                    QStringLiteral("Sampling interval in milliseconds."),
-                                   QStringLiteral("ms"), QStringLiteral("5000"));
+                                   QStringLiteral("ms"));
     QCommandLineOption thresholdOpt(QStringLiteral("tree-threshold"),
                                     QStringLiteral("Watched process-tree CPU threshold percentage."),
                                     QStringLiteral("percent"), QStringLiteral("50"));
     QCommandLineOption processThresholdOpt(QStringLiteral("process-threshold"),
                                            QStringLiteral("Individual-process CPU threshold percentage."),
                                            QStringLiteral("percent"), QStringLiteral("50"));
-    QCommandLineOption lingerOpt(QStringLiteral("linger-ms"),
-                                 QStringLiteral("Milliseconds to keep a disappeared bad process visible after a normal sample."),
-                                 QStringLiteral("ms"), QStringLiteral("3000"));
+    QCommandLineOption alertDurationOpt(QStringLiteral("alert-duration"),
+                                        QStringLiteral("Milliseconds to keep a disappeared bad process visible after a normal sample."),
+                                        QStringLiteral("ms"));
     QCommandLineOption debugOpt(QStringLiteral("debug"),
                                 QStringLiteral("Print monitor/debug information to stderr."));
     QCommandLineOption testAlertOpt(QStringLiteral("test-alert"),
@@ -34,17 +34,17 @@ int main(int argc, char **argv) {
     parser.addOption(intervalOpt);
     parser.addOption(thresholdOpt);
     parser.addOption(processThresholdOpt);
-    parser.addOption(lingerOpt);
+    parser.addOption(alertDurationOpt);
     parser.addOption(debugOpt);
     parser.addOption(testAlertOpt);
     parser.process(app);
 
     Configuration config;
     ProcessMonitor monitor;
-    monitor.setIntervalMs(parser.value(intervalOpt).toInt());
-    monitor.setTreeThresholdPercent(parser.value(thresholdOpt).toDouble());
-    monitor.setProcessThresholdPercent(parser.value(processThresholdOpt).toDouble());
-    monitor.setLingerMs(parser.value(lingerOpt).toInt());
+    monitor.setIntervalMs(parser.isSet(intervalOpt) ? parser.value(intervalOpt).toInt() : config.refreshInterval());
+    monitor.setTreeThresholdPercent(parser.isSet(thresholdOpt) ? parser.value(thresholdOpt).toDouble() : config.treeThresholdPercent());
+    monitor.setProcessThresholdPercent(parser.isSet(processThresholdOpt) ? parser.value(processThresholdOpt).toDouble() : config.processThresholdPercent());
+    monitor.setLingerMs(parser.isSet(alertDurationOpt) ? parser.value(alertDurationOpt).toInt() : config.alertDuration());
     monitor.setDebugEnabled(parser.isSet(debugOpt));
 
     AlertWindow window(&config);
