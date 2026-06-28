@@ -24,6 +24,9 @@ int main(int argc, char **argv) {
     QCommandLineOption processThresholdOpt(QStringLiteral("process-threshold"),
                                            QStringLiteral("Individual-process CPU threshold percentage."),
                                            QStringLiteral("percent"), QStringLiteral("50"));
+    QCommandLineOption lingerOpt(QStringLiteral("linger-ms"),
+                                 QStringLiteral("Milliseconds to keep a disappeared bad process visible after a normal sample."),
+                                 QStringLiteral("ms"), QStringLiteral("3000"));
     QCommandLineOption debugOpt(QStringLiteral("debug"),
                                 QStringLiteral("Print monitor/debug information to stderr."));
     QCommandLineOption testAlertOpt(QStringLiteral("test-alert"),
@@ -31,6 +34,7 @@ int main(int argc, char **argv) {
     parser.addOption(intervalOpt);
     parser.addOption(thresholdOpt);
     parser.addOption(processThresholdOpt);
+    parser.addOption(lingerOpt);
     parser.addOption(debugOpt);
     parser.addOption(testAlertOpt);
     parser.process(app);
@@ -40,11 +44,14 @@ int main(int argc, char **argv) {
     monitor.setIntervalMs(parser.value(intervalOpt).toInt());
     monitor.setTreeThresholdPercent(parser.value(thresholdOpt).toDouble());
     monitor.setProcessThresholdPercent(parser.value(processThresholdOpt).toDouble());
+    monitor.setLingerMs(parser.value(lingerOpt).toInt());
     monitor.setDebugEnabled(parser.isSet(debugOpt));
 
     AlertWindow window(&config);
     QObject::connect(&monitor, &ProcessMonitor::badProcessesChanged,
                      &window, &AlertWindow::setBadProcesses);
+    QObject::connect(&window, &AlertWindow::immediateRefreshRequested,
+                     &monitor, &ProcessMonitor::refreshNow);
 
     if (parser.isSet(testAlertOpt)) {
         QVector<BadProcess> fake;

@@ -38,13 +38,16 @@ public:
     int intervalMs() const { return m_intervalMs; }
     double treeThresholdPercent() const { return m_treeThresholdPercent; }
     double processThresholdPercent() const { return m_processThresholdPercent; }
+    int lingerMs() const { return m_lingerMs; }
 
 public slots:
     void start();
     void setIntervalMs(int ms);
     void setTreeThresholdPercent(double percent);
     void setProcessThresholdPercent(double percent);
+    void setLingerMs(int ms);
     void setDebugEnabled(bool enabled);
+    void refreshNow();
 
 signals:
     void badProcessesChanged(const QVector<BadProcess> &processes);
@@ -85,6 +88,8 @@ private:
     static QHash<int, QVector<int>> buildChildren(const Snapshot &snapshot);
     static QSet<int> collectTreePids(int rootPid, const QHash<int, QVector<int>> &children);
     QVector<BadProcess> measureBadProcesses(const Snapshot &before, const Snapshot &after, double elapsedSeconds);
+    QVector<BadProcess> applyLinger(const QVector<BadProcess> &current, qint64 nowMs, bool honorLinger);
+    void sampleInternal(bool honorLinger);
     QVector<BadProcess> measureTrees(const Snapshot &before, const Snapshot &after, double elapsedSeconds, QSet<ProcessIdentity> *badTreeMembers) const;
     QVector<BadProcess> measureLeaves(const Snapshot &before, const Snapshot &after, double elapsedSeconds, const QSet<ProcessIdentity> &suppressedMembers) const;
 
@@ -95,7 +100,10 @@ private:
     int m_intervalMs = 5000;
     double m_treeThresholdPercent = 50.0;
     double m_processThresholdPercent = 50.0;
+    int m_lingerMs = 3000;
     bool m_debug = false;
     MappingRules m_mapping;
     QVector<BadProcess> m_lastEmitted;
+    QHash<ProcessIdentity, BadProcess> m_recentProcesses;
+    QHash<ProcessIdentity, qint64> m_recentLastSeenMs;
 };

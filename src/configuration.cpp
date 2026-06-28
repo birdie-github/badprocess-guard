@@ -14,6 +14,8 @@ void Configuration::load() {
     m_opacityPercent = qBound(10, m_settings.value(QStringLiteral("appearance/opacityPercent"), 50).toInt(), 100);
     m_darkMode = m_settings.value(QStringLiteral("appearance/darkMode"), true).toBool();
     m_useCustomFont = m_settings.value(QStringLiteral("appearance/useCustomFont"), false).toBool();
+    m_allWorkspaces = m_settings.value(QStringLiteral("window/AllWorkspaces"),
+                                       m_settings.value(QStringLiteral("AllWorkspaces"), true)).toBool();
 
     const QString fontString = m_settings.value(QStringLiteral("appearance/customFont")).toString();
     if (!fontString.isEmpty())
@@ -31,6 +33,7 @@ void Configuration::save() {
     m_settings.setValue(QStringLiteral("appearance/darkMode"), m_darkMode);
     m_settings.setValue(QStringLiteral("appearance/useCustomFont"), m_useCustomFont);
     m_settings.setValue(QStringLiteral("appearance/customFont"), m_customFont.toString());
+    m_settings.setValue(QStringLiteral("window/AllWorkspaces"), m_allWorkspaces);
     if (m_hasWindowPosition) {
         m_settings.setValue(QStringLiteral("window/x"), m_windowPosition.x());
         m_settings.setValue(QStringLiteral("window/y"), m_windowPosition.y());
@@ -77,4 +80,12 @@ void Configuration::setWindowPosition(const QPoint &pos) {
     m_windowPosition = pos;
     m_hasWindowPosition = true;
     save();
+}
+
+void Configuration::setAllWorkspaces(bool enabled) {
+    if (m_allWorkspaces == enabled)
+        return;
+    m_allWorkspaces = enabled;
+    save();
+    emit changed();
 }

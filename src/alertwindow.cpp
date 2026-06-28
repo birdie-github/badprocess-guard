@@ -14,6 +14,14 @@
 #include <QScreen>
 #include <QVBoxLayout>
 #include <QResizeEvent>
+#include <QTimer>
+
+#include <cstring>
+
+#ifdef BADPROCESS_GUARD_HAVE_X11
+#include <X11/Xatom.h>
+#include <X11/Xlib.h>
+#endif
 
 #include <signal.h>
 
@@ -165,6 +173,8 @@ void AlertWindow::applyConfiguration() {
         entry->setCustomFontEnabled(m_config->useCustomFont(), m_config->customFont());
     }
     update();
+    if (isVisible())
+        applyAllWorkspacesHint();
     if (!m_processes.isEmpty())
         animateToContentHeight();
 }
@@ -187,6 +197,7 @@ void AlertWindow::animateToContentHeight() {
         }
         show();
         raise();
+        applyAllWorkspacesHint();
     }
 
     m_animation->stop();
@@ -217,10 +228,17 @@ void AlertWindow::confirmTerminate(const BadProcess &process) {
     box.addButton(QMessageBox::Cancel);
     box.exec();
 
-    if (box.clickedButton() == terminate)
-        ::kill(process.root.pid, SIGTERM);
-    else if (box.clickedButton() == kill9)
-        ::kill(process.root.pid, SIGKILL);
+    bool acted = false;
+    if (box.clickedButton() == terminate) {
+        acted = (::kill(process.root.pid, SIGTERM) == 0);
+    } else if (box.clickedButton() == kill9) {
+        acted = (::kill(process.root.pid, SIGKILL) == 0);
+    }
+
+    if (acted) {
+        QTimer::singleShot(120, this, [this] { emit immediateRefreshRequested(); });
+        QTimer::singleShot(600, this, [this] { emit immediateRefreshRequested(); });
+    }
 }
 
 int AlertWindow::contentHeightForRows(int rows) const {
@@ -238,6 +256,59 @@ void AlertWindow::positionSettingsButton() {
         return;
     m_settingsButton->move(width() - m_settingsButton->width() - 5, 3);
     m_settingsButton->raise();
+}
+
+void AlertWindow::applyAllWorkspacesHint() {
+    if (!m_config || !m_config->allWorkspaces())
+        return;
+
+#ifdef BADPROCESS_GUARD_HAVE_X11
+    if (QGuiApplication::platformName() != QLatin1String("xcb"))
+        return;
+
+    Display *display = XOpenDisplay(nullptr);
+    if (!display)
+        return;
+
+    const Window window = static_cast<Window>(winId());
+    const Window root = DefaultRootWindow(display);
+    const Atom desktopAtom = XInternAtom(display, "_NET_WM_DESKTOP", False);
+
+    if (desktopAtom != None) {
+        const unsigned long allDesktops = 0xFFFFFFFFUL;
+        XChangeProperty(display, window, desktopAtom, XA_CARDINAL,
+                        32, PropModeReplace,
+                        reinterpret_cast<const unsigned char *>(&allDesktops), 1);
+
+        XEvent event;
+        memset(&event, 0, sizeof(event));
+        event.xclient.type = ClientMessage;
+        event.xclient.window = window;
+        event.xclient.message_type = desktopAtom;
+        event.xclient.format = 32;
+        event.xclient.data.l[0] = static_cast<long>(allDesktops);
+        event.xclient.data.l[1] = 1; // normal application source indication
+        XSendEvent(display, root, False, SubstructureRedirectMask | SubstructureNotifyMask, &event);
+    }
+
+    const Atom stateAtom = XInternAtom(display, "_NET_WM_STATE", False);
+    const Atom stickyAtom = XInternAtom(display, "_NET_WM_STATE_STICKY", False);
+    if (stateAtom != None && stickyAtom != None) {
+        XEvent event;
+        memset(&event, 0, sizeof(event));
+        event.xclient.type = ClientMessage;
+        event.xclient.window = window;
+        event.xclient.message_type = stateAtom;
+        event.xclient.format = 32;
+        event.xclient.data.l[0] = 1; // _NET_WM_STATE_ADD
+        event.xclient.data.l[1] = static_cast<long>(stickyAtom);
+        event.xclient.data.l[3] = 1; // normal application source indication
+        XSendEvent(display, root, False, SubstructureRedirectMask | SubstructureNotifyMask, &event);
+    }
+
+    XFlush(display);
+    XCloseDisplay(display);
+#endif
 }
 
 void AlertWindow::resizeEvent(QResizeEvent *event) {

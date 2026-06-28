@@ -25,6 +25,9 @@ public:
 public slots:
     void setBadProcesses(const QVector<BadProcess> &processes);
 
+signals:
+    void immediateRefreshRequested();
+
 protected:
     void paintEvent(QPaintEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
@@ -40,6 +43,7 @@ private:
     int contentHeightForRows(int rows) const;
     int contentWidth() const;
     void positionSettingsButton();
+    void applyAllWorkspacesHint();
 
     Configuration *m_config = nullptr;
     QVBoxLayout *m_layout = nullptr;

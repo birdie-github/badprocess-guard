@@ -17,6 +17,7 @@ public:
     QFont customFont() const { return m_customFont; }
     QPoint windowPosition() const { return m_windowPosition; }
     bool hasWindowPosition() const { return m_hasWindowPosition; }
+    bool allWorkspaces() const { return m_allWorkspaces; }
 
 public slots:
     void setOpacityPercent(int value);
@@ -24,6 +25,7 @@ public slots:
     void setUseCustomFont(bool enabled);
     void setCustomFont(const QFont &font);
     void setWindowPosition(const QPoint &pos);
+    void setAllWorkspaces(bool enabled);
 
 signals:
     void changed();
@@ -39,4 +41,5 @@ private:
     QFont m_customFont;
     QPoint m_windowPosition;
     bool m_hasWindowPosition = false;
+    bool m_allWorkspaces = true;
 };

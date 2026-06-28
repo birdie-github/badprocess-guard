@@ -59,16 +59,30 @@ void ProcessMonitor::setProcessThresholdPercent(double percent) {
     m_processThresholdPercent = qMax(0.0, percent);
 }
 
+void ProcessMonitor::setLingerMs(int ms) {
+    m_lingerMs = qMax(0, ms);
+}
+
+void ProcessMonitor::refreshNow() {
+    sampleInternal(false);
+}
+
 void ProcessMonitor::setDebugEnabled(bool enabled) {
     m_debug = enabled;
 }
 
 void ProcessMonitor::sample() {
+    sampleInternal(true);
+}
+
+void ProcessMonitor::sampleInternal(bool honorLinger) {
     const Snapshot current = readSnapshot();
     const qint64 nowNs = QDateTime::currentMSecsSinceEpoch() * 1000000LL;
+    const qint64 nowMs = nowNs / 1000000LL;
     const double elapsed = qMax(0.001, double(nowNs - m_previousNs) / 1000000000.0);
 
-    const QVector<BadProcess> bad = measureBadProcesses(m_previous, current, elapsed);
+    const QVector<BadProcess> currentBad = measureBadProcesses(m_previous, current, elapsed);
+    const QVector<BadProcess> bad = applyLinger(currentBad, nowMs, honorLinger);
 
     if (m_debug) {
         QStringList summary;
@@ -79,9 +93,11 @@ void ProcessMonitor::sample() {
                            .arg(process.cpuPercent, 0, 'f', 1)
                            .arg(process.processCount);
         }
-        qInfo().noquote() << QStringLiteral("badprocess-guard: sample: %1 processes scanned, elapsed=%2s, bad=[%3]")
+        qInfo().noquote() << QStringLiteral("badprocess-guard: sample: %1 processes scanned, elapsed=%2s, linger=%3 ms, honor-linger=%4, bad=[%5]")
                              .arg(current.size())
                              .arg(elapsed, 0, 'f', 3)
+                             .arg(m_lingerMs)
+                             .arg(honorLinger ? QStringLiteral("true") : QStringLiteral("false"))
                              .arg(summary.join(QStringLiteral("; ")));
     }
 
@@ -102,6 +118,45 @@ void ProcessMonitor::sample() {
 
     m_previous = current;
     m_previousNs = nowNs;
+}
+
+QVector<BadProcess> ProcessMonitor::applyLinger(const QVector<BadProcess> &current, qint64 nowMs, bool honorLinger) {
+    QSet<ProcessIdentity> present;
+    QVector<BadProcess> result;
+
+    for (const BadProcess &process : current) {
+        present.insert(process.root);
+        m_recentProcesses.insert(process.root, process);
+        m_recentLastSeenMs.insert(process.root, nowMs);
+        result.append(process);
+    }
+
+    QVector<ProcessIdentity> toRemove;
+    for (auto it = m_recentProcesses.constBegin(); it != m_recentProcesses.constEnd(); ++it) {
+        const ProcessIdentity id = it.key();
+        if (present.contains(id))
+            continue;
+
+        const qint64 lastSeen = m_recentLastSeenMs.value(id, 0);
+        if (honorLinger && m_lingerMs > 0 && nowMs - lastSeen <= m_lingerMs) {
+            result.append(it.value());
+        } else {
+            toRemove.append(id);
+        }
+    }
+
+    for (const ProcessIdentity &id : toRemove) {
+        m_recentProcesses.remove(id);
+        m_recentLastSeenMs.remove(id);
+    }
+
+    std::sort(result.begin(), result.end(), [](const BadProcess &a, const BadProcess &b) {
+        if (a.cpuPercent == b.cpuPercent)
+            return a.root.pid < b.root.pid;
+        return a.cpuPercent > b.cpuPercent;
+    });
+
+    return result;
 }
 
 ProcessMonitor::Snapshot ProcessMonitor::readSnapshot() const {

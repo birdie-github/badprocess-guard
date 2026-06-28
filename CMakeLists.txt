@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(badprocess-guard VERSION 0.1.3 LANGUAGES CXX)
+project(badprocess-guard VERSION 0.1.4 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,6 +35,12 @@ add_executable(badprocess-guard
 )
 
 target_link_libraries(badprocess-guard PRIVATE ${QT_PACKAGE}::Widgets)
+
+find_package(X11 QUIET)
+if(X11_FOUND)
+    target_link_libraries(badprocess-guard PRIVATE X11::X11)
+    target_compile_definitions(badprocess-guard PRIVATE BADPROCESS_GUARD_HAVE_X11=1)
+endif()
 
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/process-mapping.ini
