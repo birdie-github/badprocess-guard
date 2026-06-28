@@ -1,0 +1,33 @@
+name: Windows CMake
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: >
+          cmake -B build -S .
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        working-directory: build
+        run: ctest --build-config Release
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: build/**/*.exe
