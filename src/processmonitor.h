@@ -43,6 +43,7 @@ public slots:
     void setIntervalMs(int ms);
     void setTreeThresholdPercent(double percent);
     void setConsecutiveSamples(int count);
+    void setDebugEnabled(bool enabled);
 
 signals:
     void badProcessesChanged(const QVector<BadProcess> &processes);
@@ -86,6 +87,7 @@ private:
     int m_intervalMs = 5000;
     double m_treeThresholdPercent = 50.0;
     int m_consecutiveSamples = 2;
+    bool m_debug = false;
     QVector<RootRule> m_rules;
     QHash<ProcessIdentity, HighState> m_states;
     QVector<BadProcess> m_lastEmitted;

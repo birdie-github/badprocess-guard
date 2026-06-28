@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QTextStream>
+#include <QDebug>
 
 #include <algorithm>
 
@@ -25,6 +26,13 @@ ProcessMonitor::ProcessMonitor(QObject *parent) : QObject(parent) {
 void ProcessMonitor::start() {
     m_previous = readSnapshot();
     m_previousNs = QDateTime::currentMSecsSinceEpoch() * 1000000LL;
+    if (m_debug) {
+        qInfo().noquote() << QStringLiteral("badprocess-guard: initial snapshot: %1 processes, interval=%2 ms, threshold=%3%, consecutive=%4")
+                             .arg(m_previous.size())
+                             .arg(m_intervalMs)
+                             .arg(m_treeThresholdPercent, 0, 'f', 1)
+                             .arg(m_consecutiveSamples);
+    }
     m_timer.start();
 }
 
@@ -41,12 +49,31 @@ void ProcessMonitor::setConsecutiveSamples(int count) {
     m_consecutiveSamples = qMax(1, count);
 }
 
+void ProcessMonitor::setDebugEnabled(bool enabled) {
+    m_debug = enabled;
+}
+
 void ProcessMonitor::sample() {
     const Snapshot current = readSnapshot();
     const qint64 nowNs = QDateTime::currentMSecsSinceEpoch() * 1000000LL;
     const double elapsed = qMax(0.001, double(nowNs - m_previousNs) / 1000000000.0);
 
     const QVector<BadProcess> bad = measureBadTrees(m_previous, current, elapsed);
+
+    if (m_debug) {
+        QStringList summary;
+        for (const BadProcess &process : bad) {
+            summary << QStringLiteral("%1 pid=%2 cpu=%3% count=%4")
+                           .arg(process.label)
+                           .arg(process.root.pid)
+                           .arg(process.cpuPercent, 0, 'f', 1)
+                           .arg(process.processCount);
+        }
+        qInfo().noquote() << QStringLiteral("badprocess-guard: sample: %1 processes scanned, elapsed=%2s, bad=[%3]")
+                             .arg(current.size())
+                             .arg(elapsed, 0, 'f', 3)
+                             .arg(summary.join(QStringLiteral("; ")));
+    }
 
     if (bad.size() != m_lastEmitted.size()) {
         m_lastEmitted = bad;
@@ -210,6 +237,15 @@ QVector<BadProcess> ProcessMonitor::measureBadTrees(const Snapshot &before, cons
         const double delta = afterTicks > beforeTicks ? double(afterTicks - beforeTicks) : 0.0;
         const double percent = 100.0 * delta / (double(m_clockTicks) * elapsedSeconds);
         HighState &state = m_states[root.id];
+        if (m_debug) {
+            qInfo().noquote() << QStringLiteral("badprocess-guard: root %1 pid=%2 cpu=%3% counted=%4 consecutive=%5 command=%6")
+                                 .arg(label)
+                                 .arg(root.id.pid)
+                                 .arg(percent, 0, 'f', 1)
+                                 .arg(counted)
+                                 .arg(state.consecutive)
+                                 .arg(commandOf(root));
+        }
         if (percent >= m_treeThresholdPercent) {
             ++state.consecutive;
         } else {

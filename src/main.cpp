@@ -24,9 +24,15 @@ int main(int argc, char **argv) {
     QCommandLineOption consecutiveOpt(QStringLiteral("consecutive"),
                                       QStringLiteral("Consecutive high samples required before display."),
                                       QStringLiteral("count"), QStringLiteral("2"));
+    QCommandLineOption debugOpt(QStringLiteral("debug"),
+                                QStringLiteral("Print monitor/debug information to stderr."));
+    QCommandLineOption testAlertOpt(QStringLiteral("test-alert"),
+                                    QStringLiteral("Show a fake alert immediately; useful for testing window rendering."));
     parser.addOption(intervalOpt);
     parser.addOption(thresholdOpt);
     parser.addOption(consecutiveOpt);
+    parser.addOption(debugOpt);
+    parser.addOption(testAlertOpt);
     parser.process(app);
 
     Configuration config;
@@ -34,10 +40,19 @@ int main(int argc, char **argv) {
     monitor.setIntervalMs(parser.value(intervalOpt).toInt());
     monitor.setTreeThresholdPercent(parser.value(thresholdOpt).toDouble());
     monitor.setConsecutiveSamples(parser.value(consecutiveOpt).toInt());
+    monitor.setDebugEnabled(parser.isSet(debugOpt));
 
     AlertWindow window(&config);
     QObject::connect(&monitor, &ProcessMonitor::badProcessesChanged,
                      &window, &AlertWindow::setBadProcesses);
+
+    if (parser.isSet(testAlertOpt)) {
+        QVector<BadProcess> fake;
+        fake.append({QStringLiteral("Firefox"), {int(QApplication::applicationPid()), 1},
+                     QStringLiteral("firefox -no-remote -P example"), 123.4, 12});
+        window.setBadProcesses(fake);
+    }
+
     monitor.start();
 
     return app.exec();
