@@ -36,13 +36,13 @@ public:
 
     int intervalMs() const { return m_intervalMs; }
     double treeThresholdPercent() const { return m_treeThresholdPercent; }
-    int consecutiveSamples() const { return m_consecutiveSamples; }
+    double processThresholdPercent() const { return m_processThresholdPercent; }
 
 public slots:
     void start();
     void setIntervalMs(int ms);
     void setTreeThresholdPercent(double percent);
-    void setConsecutiveSamples(int count);
+    void setProcessThresholdPercent(double percent);
     void setDebugEnabled(bool enabled);
 
 signals:
@@ -65,11 +65,6 @@ private:
         QSet<QString> executableBasenames;
     };
 
-    struct HighState {
-        int consecutive = 0;
-        bool active = false;
-    };
-
     using Snapshot = QHash<int, ProcInfo>;
 
     Snapshot readSnapshot() const;
@@ -78,7 +73,9 @@ private:
     static QString commandOf(const ProcInfo &info);
     static QHash<int, QVector<int>> buildChildren(const Snapshot &snapshot);
     static QSet<int> collectTreePids(int rootPid, const QHash<int, QVector<int>> &children);
-    QVector<BadProcess> measureBadTrees(const Snapshot &before, const Snapshot &after, double elapsedSeconds);
+    QVector<BadProcess> measureBadProcesses(const Snapshot &before, const Snapshot &after, double elapsedSeconds);
+    QVector<BadProcess> measureTrees(const Snapshot &before, const Snapshot &after, double elapsedSeconds, QSet<ProcessIdentity> *badTreeMembers) const;
+    QVector<BadProcess> measureLeaves(const Snapshot &before, const Snapshot &after, double elapsedSeconds, const QSet<ProcessIdentity> &suppressedMembers) const;
 
     QTimer m_timer;
     Snapshot m_previous;
@@ -86,9 +83,8 @@ private:
     long m_clockTicks = 100;
     int m_intervalMs = 5000;
     double m_treeThresholdPercent = 50.0;
-    int m_consecutiveSamples = 2;
+    double m_processThresholdPercent = 50.0;
     bool m_debug = false;
     QVector<RootRule> m_rules;
-    QHash<ProcessIdentity, HighState> m_states;
     QVector<BadProcess> m_lastEmitted;
 };

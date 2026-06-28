@@ -1,12 +1,20 @@
 # badprocess-guard
 
-A small Qt Widgets desktop guard for Linux process trees.
+A small Qt Widgets desktop guard for Linux CPU-heavy processes.
 
-It watches configured process roots, currently Firefox and Thunderbird, using
-Linux `/proc` CPU accounting. When a configured process tree stays above the CPU
-threshold, it shows a compact frameless translucent overlay. Each bad process
-root appears on one line with a stop button, name, PID, CPU percentage, and a
-settings gear.
+It uses Linux `/proc` CPU accounting. Every sample is treated as current state:
+if a watched process tree or an individual process is above threshold, the
+compact frameless translucent overlay appears immediately; when nothing is above
+threshold, it disappears.
+
+Watched trees are currently:
+
+- Firefox roots named `firefox`
+- Thunderbird roots named `thunderbird`
+
+A watched tree is shown as one compact line for the root process, with the CPU
+usage summed across the root and all descendants. Other CPU-heavy processes are
+shown individually.
 
 The stop button opens a confirmation dialog with:
 
@@ -45,8 +53,8 @@ cmake --build build-qt6 -j$(nproc)
 ## Defaults
 
 - Sample interval: 5 seconds
-- Tree CPU threshold: 50%
-- Required consecutive high samples: 2
+- Watched-tree CPU threshold: 50%
+- Individual-process CPU threshold: 50%
 - Overlay opacity: 50%
 - Minimum configurable opacity: 10%
 
@@ -55,23 +63,16 @@ CPU; 200% means two logical CPUs, and so on.
 
 ## Debugging
 
-The overlay is intentionally invisible when no configured process tree is above
-the threshold for the required number of samples. With the defaults this means:
-
-- first CPU interval: 5 seconds;
-- second consecutive high interval: another 5 seconds;
-- visible only if Firefox or Thunderbird is still above the tree threshold.
-
 Useful commands:
 
 ```sh
 ./build/badprocess-guard --debug
-./build/badprocess-guard --debug --tree-threshold 1 --consecutive 1
+./build/badprocess-guard --debug --tree-threshold 1 --process-threshold 1
 ./build/badprocess-guard --test-alert
 ```
 
-`--debug` prints snapshots, matching roots, aggregate CPU percentages and the
-current bad-process list to stderr.
+`--debug` prints snapshots, watched roots, aggregate tree CPU percentages,
+individual bad processes, and the current bad-process list to stderr.
 
 `--test-alert` shows a fake single-line alert immediately, so it verifies the
 window, transparency, animation, settings button and font/theme handling even

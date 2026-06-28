@@ -19,18 +19,18 @@ int main(int argc, char **argv) {
                                    QStringLiteral("Sampling interval in milliseconds."),
                                    QStringLiteral("ms"), QStringLiteral("5000"));
     QCommandLineOption thresholdOpt(QStringLiteral("tree-threshold"),
-                                    QStringLiteral("Tree CPU threshold percentage."),
+                                    QStringLiteral("Watched process-tree CPU threshold percentage."),
                                     QStringLiteral("percent"), QStringLiteral("50"));
-    QCommandLineOption consecutiveOpt(QStringLiteral("consecutive"),
-                                      QStringLiteral("Consecutive high samples required before display."),
-                                      QStringLiteral("count"), QStringLiteral("2"));
+    QCommandLineOption processThresholdOpt(QStringLiteral("process-threshold"),
+                                           QStringLiteral("Individual-process CPU threshold percentage."),
+                                           QStringLiteral("percent"), QStringLiteral("50"));
     QCommandLineOption debugOpt(QStringLiteral("debug"),
                                 QStringLiteral("Print monitor/debug information to stderr."));
     QCommandLineOption testAlertOpt(QStringLiteral("test-alert"),
                                     QStringLiteral("Show a fake alert immediately; useful for testing window rendering."));
     parser.addOption(intervalOpt);
     parser.addOption(thresholdOpt);
-    parser.addOption(consecutiveOpt);
+    parser.addOption(processThresholdOpt);
     parser.addOption(debugOpt);
     parser.addOption(testAlertOpt);
     parser.process(app);
@@ -39,7 +39,7 @@ int main(int argc, char **argv) {
     ProcessMonitor monitor;
     monitor.setIntervalMs(parser.value(intervalOpt).toInt());
     monitor.setTreeThresholdPercent(parser.value(thresholdOpt).toDouble());
-    monitor.setConsecutiveSamples(parser.value(consecutiveOpt).toInt());
+    monitor.setProcessThresholdPercent(parser.value(processThresholdOpt).toDouble());
     monitor.setDebugEnabled(parser.isSet(debugOpt));
 
     AlertWindow window(&config);
