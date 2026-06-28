@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(badprocess-guard VERSION 0.1.2 LANGUAGES CXX)
+project(badprocess-guard VERSION 0.1.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -36,8 +36,15 @@ add_executable(badprocess-guard
 
 target_link_libraries(badprocess-guard PRIVATE ${QT_PACKAGE}::Widgets)
 
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/process-mapping.ini
+    ${CMAKE_CURRENT_BINARY_DIR}/process-mapping.ini
+    COPYONLY
+)
+
 target_compile_options(badprocess-guard PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
 )
 
 install(TARGETS badprocess-guard RUNTIME DESTINATION bin)
+install(FILES process-mapping.ini DESTINATION share/badprocess-guard)

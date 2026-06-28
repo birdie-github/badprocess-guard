@@ -77,3 +77,42 @@ individual bad processes, and the current bad-process list to stderr.
 `--test-alert` shows a fake single-line alert immediately, so it verifies the
 window, transparency, animation, settings button and font/theme handling even
 when the monitor has found nothing.
+
+
+Process mapping
+---------------
+
+Friendly names and aggregate tree roots live in `process-mapping.ini`.  The
+build copies this file next to the executable, so `./build/badprocess-guard`
+will find it automatically.  A user override can be placed at:
+
+```text
+~/.config/badprocess-guard/process-mapping.ini
+```
+
+Sections:
+
+```ini
+[tree-roots]
+firefox=Firefox
+
+[exact]
+firefox-bin=Firefox
+7z=7-Zip
+
+[contains]
+libdatetime.so=DateTime
+```
+
+Matching is deliberately simple: exact executable basename, or full command
+line contains a literal substring.  There are no regexes, shell expansion, or
+commands executed from the mapping file.
+
+The visible HUD row is intentionally compact:
+
+```text
+🛑 Firefox · 1648448 · 72%
+```
+
+No title, no `PID`/`CPU` labels, and no command-line arguments in the visible
+text.  Full details remain available in the tooltip and termination dialog.

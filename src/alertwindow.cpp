@@ -13,6 +13,7 @@
 #include <QPainter>
 #include <QScreen>
 #include <QVBoxLayout>
+#include <QResizeEvent>
 
 #include <signal.h>
 
@@ -36,32 +37,22 @@ AlertWindow::AlertWindow(Configuration *config, QWidget *parent)
     setAttribute(Qt::WA_TranslucentBackground, true);
     setAttribute(Qt::WA_ShowWithoutActivating, true);
     setMouseTracking(true);
-    setFixedWidth(560);
+    setFixedWidth(180);
     setAnimatedHeight(0);
 
     m_layout = new QVBoxLayout(this);
-    m_layout->setContentsMargins(12, 8, 12, 8);
-    m_layout->setSpacing(3);
+    // Right margin leaves room for the floating gear button without spending a
+    // separate title row on it.
+    m_layout->setContentsMargins(8, 4, 28, 4);
+    m_layout->setSpacing(1);
 
-    auto *header = new QWidget(this);
-    auto *headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(0, 0, 0, 0);
-    headerLayout->setSpacing(4);
-
-    auto *title = new QLabel(QStringLiteral("Bad processes"), header);
-    title->setObjectName(QStringLiteral("titleLabel"));
-    title->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-
-    m_settingsButton = new QToolButton(header);
+    m_settingsButton = new QToolButton(this);
     m_settingsButton->setText(QStringLiteral("⚙"));
     m_settingsButton->setAutoRaise(true);
     m_settingsButton->setToolTip(QStringLiteral("Settings"));
     m_settingsButton->setCursor(Qt::PointingHandCursor);
-    m_settingsButton->setFixedSize(26, 24);
-
-    headerLayout->addWidget(title, 1);
-    headerLayout->addWidget(m_settingsButton);
-    m_layout->addWidget(header);
+    m_settingsButton->setFixedSize(20, 20);
+    m_settingsButton->raise();
 
     m_animation = new QPropertyAnimation(this, QByteArrayLiteral("animatedHeight"), this);
     m_animation->setDuration(180);
@@ -160,8 +151,7 @@ void AlertWindow::applyConfiguration() {
     const QString textColor = m_config->darkMode() ? QStringLiteral("#f5f5f5") : QStringLiteral("#111111");
     setStyleSheet(QStringLiteral(
         "QFrame { background: transparent; }"
-        "QLabel#titleLabel { color: %1; font-weight: 600; }"
-        "QToolButton { color: %1; border: 0; background: transparent; font-size: 16px; }"
+        "QToolButton { color: %1; border: 0; background: transparent; font-size: 14px; }"
         "QToolButton:hover { background: rgba(127,127,127,45); border-radius: 5px; }"
     ).arg(textColor));
 
@@ -175,11 +165,20 @@ void AlertWindow::applyConfiguration() {
         entry->setCustomFontEnabled(m_config->useCustomFont(), m_config->customFont());
     }
     update();
+    if (!m_processes.isEmpty())
+        animateToContentHeight();
 }
 
 void AlertWindow::animateToContentHeight() {
-    const int target = m_processes.isEmpty() ? 0 : contentHeightForRows(m_processes.size());
-    if (target > 0 && !isVisible()) {
+    m_layout->activate();
+    const int targetHeight = m_processes.isEmpty() ? 0 : contentHeightForRows(m_processes.size());
+    const int targetWidth = m_processes.isEmpty() ? width() : contentWidth();
+
+    if (targetWidth > 0 && targetWidth != width())
+        setFixedWidth(targetWidth);
+    positionSettingsButton();
+
+    if (targetHeight > 0 && !isVisible()) {
         if (m_config->hasWindowPosition()) {
             move(m_config->windowPosition());
         } else {
@@ -192,7 +191,7 @@ void AlertWindow::animateToContentHeight() {
 
     m_animation->stop();
     m_animation->setStartValue(height());
-    m_animation->setEndValue(target);
+    m_animation->setEndValue(targetHeight);
     m_animation->start();
 }
 
@@ -225,9 +224,23 @@ void AlertWindow::confirmTerminate(const BadProcess &process) {
 }
 
 int AlertWindow::contentHeightForRows(int rows) const {
-    const int header = 28;
-    const int row = 28;
-    const int margins = 16;
-    const int spacing = qMax(0, rows - 1) * 3;
-    return margins + header + rows * row + spacing;
+    Q_UNUSED(rows)
+    return m_layout->sizeHint().height();
+}
+
+int AlertWindow::contentWidth() const {
+    const int suggested = m_layout->sizeHint().width();
+    return qBound(90, suggested, 520);
+}
+
+void AlertWindow::positionSettingsButton() {
+    if (!m_settingsButton)
+        return;
+    m_settingsButton->move(width() - m_settingsButton->width() - 5, 3);
+    m_settingsButton->raise();
+}
+
+void AlertWindow::resizeEvent(QResizeEvent *event) {
+    QFrame::resizeEvent(event);
+    positionSettingsButton();
 }

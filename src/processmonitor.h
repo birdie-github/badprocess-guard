@@ -6,6 +6,7 @@
 #include <QHash>
 #include <QSet>
 #include <QStringList>
+#include <QPair>
 
 struct ProcessIdentity {
     int pid = -1;
@@ -61,8 +62,14 @@ private:
     };
 
     struct RootRule {
+        QString executableBasename;
         QString label;
-        QSet<QString> executableBasenames;
+    };
+
+    struct MappingRules {
+        QVector<RootRule> treeRoots;
+        QHash<QString, QString> exactNames;
+        QVector<QPair<QString, QString>> containsNames;
     };
 
     using Snapshot = QHash<int, ProcInfo>;
@@ -71,6 +78,10 @@ private:
     static bool readProc(int pid, ProcInfo *info);
     static QString basenameOfArgv0(const ProcInfo &info);
     static QString commandOf(const ProcInfo &info);
+    QString displayNameFor(const ProcInfo &info) const;
+    void loadProcessMapping();
+    void loadProcessMappingFile(const QString &path, bool *loaded);
+    QStringList processMappingSearchPaths() const;
     static QHash<int, QVector<int>> buildChildren(const Snapshot &snapshot);
     static QSet<int> collectTreePids(int rootPid, const QHash<int, QVector<int>> &children);
     QVector<BadProcess> measureBadProcesses(const Snapshot &before, const Snapshot &after, double elapsedSeconds);
@@ -85,6 +96,6 @@ private:
     double m_treeThresholdPercent = 50.0;
     double m_processThresholdPercent = 50.0;
     bool m_debug = false;
-    QVector<RootRule> m_rules;
+    MappingRules m_mapping;
     QVector<BadProcess> m_lastEmitted;
 };

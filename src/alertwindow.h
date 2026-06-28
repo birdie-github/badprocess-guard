@@ -30,6 +30,7 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     void applyConfiguration();
@@ -37,6 +38,8 @@ private:
     void showSettings();
     void confirmTerminate(const BadProcess &process);
     int contentHeightForRows(int rows) const;
+    int contentWidth() const;
+    void positionSettingsButton();
 
     Configuration *m_config = nullptr;
     QVBoxLayout *m_layout = nullptr;

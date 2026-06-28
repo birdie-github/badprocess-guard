@@ -1,9 +1,11 @@
 #include "processmonitor.h"
 
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QStandardPaths>
 #include <QTextStream>
 #include <QDebug>
 
@@ -22,8 +24,7 @@ ProcessMonitor::ProcessMonitor(QObject *parent) : QObject(parent) {
     if (m_clockTicks <= 0)
         m_clockTicks = 100;
 
-    m_rules.append({QStringLiteral("Firefox tree"), {QStringLiteral("firefox")}});
-    m_rules.append({QStringLiteral("Thunderbird tree"), {QStringLiteral("thunderbird")}});
+    loadProcessMapping();
 
     m_timer.setInterval(m_intervalMs);
     connect(&m_timer, &QTimer::timeout, this, &ProcessMonitor::sample);
@@ -33,11 +34,14 @@ void ProcessMonitor::start() {
     m_previous = readSnapshot();
     m_previousNs = QDateTime::currentMSecsSinceEpoch() * 1000000LL;
     if (m_debug) {
-        qInfo().noquote() << QStringLiteral("badprocess-guard: initial snapshot: %1 processes, interval=%2 ms, tree-threshold=%3%, process-threshold=%4%")
+        qInfo().noquote() << QStringLiteral("badprocess-guard: initial snapshot: %1 processes, interval=%2 ms, tree-threshold=%3%, process-threshold=%4%, tree-roots=%5, exact-mappings=%6, contains-mappings=%7")
                              .arg(m_previous.size())
                              .arg(m_intervalMs)
                              .arg(m_treeThresholdPercent, 0, 'f', 1)
-                             .arg(m_processThresholdPercent, 0, 'f', 1);
+                             .arg(m_processThresholdPercent, 0, 'f', 1)
+                             .arg(m_mapping.treeRoots.size())
+                             .arg(m_mapping.exactNames.size())
+                             .arg(m_mapping.containsNames.size());
     }
     m_timer.start();
 }
@@ -175,6 +179,99 @@ QString ProcessMonitor::commandOf(const ProcInfo &info) {
     return info.comm;
 }
 
+QStringList ProcessMonitor::processMappingSearchPaths() const {
+    QStringList paths;
+
+    const QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    if (!configDir.isEmpty())
+        paths << QDir(configDir).filePath(QStringLiteral("process-mapping.ini"));
+
+    const QString appDir = QCoreApplication::applicationDirPath();
+    paths << QDir(appDir).filePath(QStringLiteral("process-mapping.ini"));
+    paths << QDir(appDir).filePath(QStringLiteral("../process-mapping.ini"));
+    paths << QDir(appDir).filePath(QStringLiteral("../share/badprocess-guard/process-mapping.ini"));
+    paths << QStringLiteral("/usr/share/badprocess-guard/process-mapping.ini");
+    paths << QStringLiteral("/usr/local/share/badprocess-guard/process-mapping.ini");
+
+    return paths;
+}
+
+void ProcessMonitor::loadProcessMapping() {
+    bool loaded = false;
+    for (const QString &path : processMappingSearchPaths()) {
+        loadProcessMappingFile(path, &loaded);
+        if (loaded) {
+            if (m_debug)
+                qInfo().noquote() << QStringLiteral("badprocess-guard: loaded process mapping: %1").arg(path);
+            break;
+        }
+    }
+
+    if (!loaded) {
+        // Last-resort minimal rules.  Normal builds ship process-mapping.ini,
+        // so these are only for accidental launches from unusual directories.
+        m_mapping.treeRoots.append({QStringLiteral("firefox"), QStringLiteral("Firefox")});
+        m_mapping.treeRoots.append({QStringLiteral("thunderbird"), QStringLiteral("Thunderbird")});
+        m_mapping.exactNames.insert(QStringLiteral("firefox"), QStringLiteral("Firefox"));
+        m_mapping.exactNames.insert(QStringLiteral("firefox-bin"), QStringLiteral("Firefox"));
+        m_mapping.exactNames.insert(QStringLiteral("thunderbird"), QStringLiteral("Thunderbird"));
+        m_mapping.exactNames.insert(QStringLiteral("thunderbird-bin"), QStringLiteral("Thunderbird"));
+    }
+}
+
+void ProcessMonitor::loadProcessMappingFile(const QString &path, bool *loaded) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return;
+
+    QString section;
+    QTextStream in(&file);
+    while (!in.atEnd()) {
+        QString line = in.readLine().trimmed();
+        if (line.isEmpty() || line.startsWith(QLatin1Char('#')) || line.startsWith(QLatin1Char(';')))
+            continue;
+
+        if (line.startsWith(QLatin1Char('[')) && line.endsWith(QLatin1Char(']'))) {
+            section = line.mid(1, line.size() - 2).trimmed().toLower();
+            continue;
+        }
+
+        const int eq = line.indexOf(QLatin1Char('='));
+        if (eq <= 0)
+            continue;
+
+        const QString key = line.left(eq).trimmed();
+        const QString value = line.mid(eq + 1).trimmed();
+        if (key.isEmpty() || value.isEmpty())
+            continue;
+
+        if (section == QLatin1String("tree-roots")) {
+            m_mapping.treeRoots.append({key, value});
+        } else if (section == QLatin1String("exact")) {
+            m_mapping.exactNames.insert(key, value);
+        } else if (section == QLatin1String("contains")) {
+            m_mapping.containsNames.append(qMakePair(key, value));
+        }
+    }
+
+    *loaded = !m_mapping.treeRoots.isEmpty() || !m_mapping.exactNames.isEmpty() || !m_mapping.containsNames.isEmpty();
+}
+
+QString ProcessMonitor::displayNameFor(const ProcInfo &info) const {
+    const QString base = basenameOfArgv0(info);
+    const auto exactIt = m_mapping.exactNames.constFind(base);
+    if (exactIt != m_mapping.exactNames.constEnd())
+        return exactIt.value();
+
+    const QString command = commandOf(info);
+    for (const auto &rule : m_mapping.containsNames) {
+        if (command.contains(rule.first))
+            return rule.second;
+    }
+
+    return base.isEmpty() ? info.comm : base;
+}
+
 QHash<int, QVector<int>> ProcessMonitor::buildChildren(const Snapshot &snapshot) {
     QHash<int, QVector<int>> children;
     for (const ProcInfo &info : snapshot)
@@ -219,16 +316,35 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
     const QHash<int, QVector<int>> children = buildChildren(after);
     QVector<BadProcess> bad;
 
-    for (const ProcInfo &root : after) {
-        QString label;
-        const QString base = basenameOfArgv0(root);
-        for (const RootRule &rule : m_rules) {
-            if (rule.executableBasenames.contains(base)) {
-                label = rule.label;
-                break;
-            }
+    auto rootLabelForBase = [this](const QString &base) -> QString {
+        for (const RootRule &rule : m_mapping.treeRoots) {
+            if (rule.executableBasename == base)
+                return rule.label;
         }
+        return QString();
+    };
+
+    auto hasConfiguredRootAncestor = [&](const ProcInfo &candidate) -> bool {
+        QSet<int> seen;
+        int parentPid = candidate.ppid;
+        while (parentPid > 1 && !seen.contains(parentPid)) {
+            seen.insert(parentPid);
+            const auto parentIt = after.constFind(parentPid);
+            if (parentIt == after.constEnd())
+                return false;
+            if (!rootLabelForBase(basenameOfArgv0(*parentIt)).isEmpty())
+                return true;
+            parentPid = parentIt->ppid;
+        }
+        return false;
+    };
+
+    for (const ProcInfo &root : after) {
+        const QString base = basenameOfArgv0(root);
+        const QString label = rootLabelForBase(base);
         if (label.isEmpty())
+            continue;
+        if (hasConfiguredRootAncestor(root))
             continue;
 
         const QSet<int> pids = collectTreePids(root.id.pid, children);
@@ -291,8 +407,7 @@ QVector<BadProcess> ProcessMonitor::measureLeaves(const Snapshot &before, const 
         if (percent < m_processThresholdPercent)
             continue;
 
-        const QString base = basenameOfArgv0(process);
-        const QString label = base.isEmpty() ? process.comm : base;
+        const QString label = displayNameFor(process);
         if (m_debug) {
             qInfo().noquote() << QStringLiteral("badprocess-guard: process %1 pid=%2 cpu=%3% command=%4")
                                  .arg(label)

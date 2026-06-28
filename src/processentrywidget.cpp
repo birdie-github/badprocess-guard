@@ -2,35 +2,28 @@
 
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QStyle>
-
-static QString elideMiddle(const QString &text, int maxChars) {
-    if (text.size() <= maxChars)
-        return text;
-    const int left = maxChars / 2;
-    const int right = maxChars - left - 1;
-    return text.left(left) + QStringLiteral("…") + text.right(right);
-}
+#include <QtGlobal>
 
 ProcessEntryWidget::ProcessEntryWidget(QWidget *parent) : QWidget(parent) {
-    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
 
     m_stopButton = new QToolButton(this);
     m_stopButton->setText(QStringLiteral("🛑"));
-    m_stopButton->setToolTip(QStringLiteral("Terminate or kill this process tree"));
+    m_stopButton->setToolTip(QStringLiteral("Terminate process tree"));
     m_stopButton->setAutoRaise(true);
     m_stopButton->setCursor(Qt::PointingHandCursor);
-    m_stopButton->setFixedSize(26, 24);
+    m_stopButton->setFixedSize(20, 20);
 
     m_text = new QLabel(this);
-    m_text->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_text->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    m_text->setTextInteractionFlags(Qt::NoTextInteraction);
+    m_text->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
+    m_text->setTextFormat(Qt::RichText);
 
     auto *layout = new QHBoxLayout(this);
-    layout->setContentsMargins(4, 0, 4, 0);
-    layout->setSpacing(6);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(4);
     layout->addWidget(m_stopButton);
-    layout->addWidget(m_text, 1);
+    layout->addWidget(m_text);
 
     connect(m_stopButton, &QToolButton::clicked, this, [this] {
         emit terminateRequested(m_process);
@@ -39,17 +32,16 @@ ProcessEntryWidget::ProcessEntryWidget(QWidget *parent) : QWidget(parent) {
 
 void ProcessEntryWidget::setProcess(const BadProcess &process) {
     m_process = process;
-    const QString command = elideMiddle(process.command, 80);
-    m_text->setText(QStringLiteral("<b>%1</b>  PID %2  CPU %3%  <span style='opacity:.75'>%4</span>")
+    m_text->setText(QStringLiteral("<b>%1</b> · %2 · %3%")
                         .arg(process.label.toHtmlEscaped())
                         .arg(process.root.pid)
-                        .arg(process.cpuPercent, 0, 'f', 1)
-                        .arg(command.toHtmlEscaped()));
-    setToolTip(QStringLiteral("%1\nPID: %2\nCPU tree: %3%\nProcesses: %4")
+                        .arg(qRound(process.cpuPercent)));
+    setToolTip(QStringLiteral("%1\nPID: %2\nCPU: %3%\nProcesses: %4")
                    .arg(process.command)
                    .arg(process.root.pid)
                    .arg(process.cpuPercent, 0, 'f', 1)
                    .arg(process.processCount));
+    updateGeometry();
 }
 
 void ProcessEntryWidget::setDarkMode(bool dark) {
@@ -66,4 +58,5 @@ void ProcessEntryWidget::setCustomFontEnabled(bool enabled, const QFont &font) {
         m_text->setFont(QFont());
         m_stopButton->setFont(QFont());
     }
+    updateGeometry();
 }
