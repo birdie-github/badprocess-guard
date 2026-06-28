@@ -35,7 +35,7 @@ Settings are stored in:
 The configuration schema is intentionally clean and flat:
 
 ```ini
-[General]
+[Settings]
 RefreshInterval=5000
 AlertDuration=3000
 Opacity=50
@@ -67,7 +67,7 @@ cmake --build build -j$(nproc)
 Qt6:
 
 ```bash
-cmake -S . -B build-qt6 -DBADPROCESS_GUARD_QT6=ON
+cmake -S . -B build-qt6 -DQT6_ENABLE=ON
 cmake --build build-qt6 -j$(nproc)
 ```
 

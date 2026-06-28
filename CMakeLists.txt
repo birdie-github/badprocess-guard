@@ -6,9 +6,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-option(BADPROCESS_GUARD_QT6 "Build with Qt6 instead of Qt5" OFF)
+option(ENABLE_QT6 "Build with Qt6 instead of Qt5" OFF)
 
-if(BADPROCESS_GUARD_QT6)
+if(ENABLE_QT6)
     find_package(Qt6 REQUIRED COMPONENTS Widgets)
     set(QT_PACKAGE Qt6)
 else()

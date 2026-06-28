@@ -11,7 +11,7 @@ Configuration::Configuration(QObject *parent)
 }
 
 void Configuration::load() {
-    m_settings.beginGroup(QStringLiteral("General"));
+    m_settings.beginGroup(QStringLiteral("Settings"));
 
     m_opacityPercent = qBound(10, m_settings.value(QStringLiteral("Opacity"), 50).toInt(), 100);
     m_darkMode = m_settings.value(QStringLiteral("DarkMode"), true).toBool();
@@ -36,7 +36,7 @@ void Configuration::load() {
 }
 
 void Configuration::save() {
-    m_settings.beginGroup(QStringLiteral("General"));
+    m_settings.beginGroup(QStringLiteral("Settings"));
     m_settings.setValue(QStringLiteral("Opacity"), m_opacityPercent);
     m_settings.setValue(QStringLiteral("DarkMode"), m_darkMode);
     m_settings.setValue(QStringLiteral("Font"), m_useCustomFont ? m_customFont.toString() : QString());
