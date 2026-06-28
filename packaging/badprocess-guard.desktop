@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=badprocess-guard
+Comment=Guard against CPU-heavy process trees
+Exec=badprocess-guard
+Terminal=false
+Categories=Utility;System;Monitor;
