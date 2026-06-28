@@ -96,7 +96,7 @@ private:
     QTimer m_timer;
     Snapshot m_previous;
     qint64 m_previousNs = 0;
-    long m_clockTicks = 100;
+    double m_cpuUnitsPerSecond = 100.0;
     int m_intervalMs = 5000;
     double m_treeThresholdPercent = 50.0;
     double m_processThresholdPercent = 50.0;

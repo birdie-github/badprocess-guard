@@ -129,3 +129,19 @@ The visible HUD row is intentionally compact:
 
 No title, no `PID`/`CPU` labels, and no command-line arguments in the visible
 text. Full details remain available in the tooltip and termination dialog.
+
+
+Windows notes
+-------------
+
+The UI builds on Windows via Qt Widgets.  The Windows monitor backend uses
+ToolHelp process enumeration and GetProcessTimes().  CPU percentages intentionally
+match the Linux semantics: 100% means one fully busy logical CPU, 200% means two,
+and so on.  They are not normalized the way Windows Task Manager usually presents
+process CPU as a fraction of total machine capacity.
+
+The `AllWorkspaces` setting is X11/Linux-only and is ignored on Windows.
+Windows windows are still created as always-on-top via Qt.
+
+Windows has no direct SIGTERM equivalent here; both Terminate and Kill use
+TerminateProcess() for now.

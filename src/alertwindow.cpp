@@ -22,7 +22,11 @@
 #include <X11/Xlib.h>
 #endif
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#else
 #include <signal.h>
+#endif
 
 static QRect availableGeometryForWindow(QWidget *window) {
 #if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
@@ -231,11 +235,21 @@ void AlertWindow::confirmTerminate(const BadProcess &process) {
     box.exec();
 
     bool acted = false;
+#ifdef Q_OS_WIN
+    if (box.clickedButton() == terminate || box.clickedButton() == kill9) {
+        HANDLE handle = OpenProcess(PROCESS_TERMINATE, FALSE, DWORD(process.root.pid));
+        if (handle) {
+            acted = TerminateProcess(handle, 1) != 0;
+            CloseHandle(handle);
+        }
+    }
+#else
     if (box.clickedButton() == terminate) {
         acted = (::kill(process.root.pid, SIGTERM) == 0);
     } else if (box.clickedButton() == kill9) {
         acted = (::kill(process.root.pid, SIGKILL) == 0);
     }
+#endif
 
     if (acted) {
         QTimer::singleShot(120, this, [this] { emit immediateRefreshRequested(); });

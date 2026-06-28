@@ -10,19 +10,34 @@
 #include <QDebug>
 
 #include <algorithm>
+#include <cstring>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <tlhelp32.h>
+#else
 #include <unistd.h>
+#endif
 
-static double cpuPercent(quint64 beforeTicks, quint64 afterTicks, double elapsedSeconds, long clockTicks) {
-    if (afterTicks <= beforeTicks || elapsedSeconds <= 0.0 || clockTicks <= 0)
+static double cpuPercent(quint64 beforeUnits, quint64 afterUnits, double elapsedSeconds, double unitsPerSecond) {
+    if (afterUnits <= beforeUnits || elapsedSeconds <= 0.0 || unitsPerSecond <= 0.0)
         return 0.0;
-    return 100.0 * double(afterTicks - beforeTicks) / (double(clockTicks) * elapsedSeconds);
+    // Deliberately NOT normalized by total CPU count.  100% means one fully
+    // busy logical CPU, 200% means two, matching the Linux /proc semantics.
+    return 100.0 * double(afterUnits - beforeUnits) / (unitsPerSecond * elapsedSeconds);
 }
 
 ProcessMonitor::ProcessMonitor(QObject *parent) : QObject(parent) {
-    m_clockTicks = sysconf(_SC_CLK_TCK);
-    if (m_clockTicks <= 0)
-        m_clockTicks = 100;
+#ifdef Q_OS_WIN
+    // GetProcessTimes() returns 100 ns units.  Do not divide by CPU count:
+    // one fully busy logical CPU must be reported as ~100%, not Task
+    // Manager-style percent of the entire machine.
+    m_cpuUnitsPerSecond = 10000000.0;
+#else
+    m_cpuUnitsPerSecond = double(sysconf(_SC_CLK_TCK));
+    if (m_cpuUnitsPerSecond <= 0.0)
+        m_cpuUnitsPerSecond = 100.0;
+#endif
 
     loadProcessMapping();
 
@@ -161,6 +176,62 @@ QVector<BadProcess> ProcessMonitor::applyLinger(const QVector<BadProcess> &curre
 
 ProcessMonitor::Snapshot ProcessMonitor::readSnapshot() const {
     Snapshot result;
+#ifdef Q_OS_WIN
+    const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE)
+        return result;
+
+    PROCESSENTRY32W entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.dwSize = sizeof(entry);
+
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            ProcInfo info;
+            const int pid = static_cast<int>(entry.th32ProcessID);
+            info.id.pid = pid;
+            info.ppid = static_cast<int>(entry.th32ParentProcessID);
+            info.comm = QString::fromWCharArray(entry.szExeFile);
+            info.argv << info.comm;
+
+            HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
+            if (!process) {
+                process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, entry.th32ProcessID);
+            }
+            if (!process)
+                continue;
+
+            FILETIME creationTime, exitTime, kernelTime, userTime;
+            if (!GetProcessTimes(process, &creationTime, &exitTime, &kernelTime, &userTime)) {
+                CloseHandle(process);
+                continue;
+            }
+
+            ULARGE_INTEGER ct, kt, ut;
+            ct.LowPart = creationTime.dwLowDateTime;
+            ct.HighPart = creationTime.dwHighDateTime;
+            kt.LowPart = kernelTime.dwLowDateTime;
+            kt.HighPart = kernelTime.dwHighDateTime;
+            ut.LowPart = userTime.dwLowDateTime;
+            ut.HighPart = userTime.dwHighDateTime;
+
+            wchar_t imagePath[32768];
+            DWORD pathLen = DWORD(sizeof(imagePath) / sizeof(imagePath[0]));
+            if (QueryFullProcessImageNameW(process, 0, imagePath, &pathLen) && pathLen > 0) {
+                info.argv.clear();
+                info.argv << QString::fromWCharArray(imagePath, int(pathLen));
+            }
+
+            CloseHandle(process);
+
+            info.id.startTime = ct.QuadPart;
+            info.cpuTicks = kt.QuadPart + ut.QuadPart;
+            result.insert(pid, info);
+        } while (Process32NextW(snapshot, &entry));
+    }
+
+    CloseHandle(snapshot);
+#else
     const QDir proc(QStringLiteral("/proc"));
     const QFileInfoList entries = proc.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
 
@@ -173,10 +244,16 @@ ProcessMonitor::Snapshot ProcessMonitor::readSnapshot() const {
         if (readProc(pid, &info))
             result.insert(pid, info);
     }
+#endif
     return result;
 }
 
 bool ProcessMonitor::readProc(int pid, ProcInfo *info) {
+#ifdef Q_OS_WIN
+    Q_UNUSED(pid)
+    Q_UNUSED(info)
+    return false;
+#else
     QFile statFile(QStringLiteral("/proc/%1/stat").arg(pid));
     if (!statFile.open(QIODevice::ReadOnly | QIODevice::Text))
         return false;
@@ -220,6 +297,7 @@ bool ProcessMonitor::readProc(int pid, ProcInfo *info) {
     info->comm = comm;
     info->argv = argv;
     return true;
+#endif
 }
 
 QString ProcessMonitor::basenameOfArgv0(const ProcInfo &info) {
@@ -424,7 +502,7 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
         if (!beforeById.contains(root.id))
             continue;
 
-        const double percent = cpuPercent(beforeTicks, afterTicks, elapsedSeconds, m_clockTicks);
+        const double percent = cpuPercent(beforeTicks, afterTicks, elapsedSeconds, m_cpuUnitsPerSecond);
         if (m_debug) {
             qInfo().noquote() << QStringLiteral("badprocess-guard: tree root %1 pid=%2 cpu=%3% counted=%4 command=%5")
                                  .arg(label)
@@ -458,7 +536,7 @@ QVector<BadProcess> ProcessMonitor::measureLeaves(const Snapshot &before, const 
         if (beforeIt == beforeById.constEnd())
             continue;
 
-        const double percent = cpuPercent(beforeIt->cpuTicks, process.cpuTicks, elapsedSeconds, m_clockTicks);
+        const double percent = cpuPercent(beforeIt->cpuTicks, process.cpuTicks, elapsedSeconds, m_cpuUnitsPerSecond);
         if (percent < m_processThresholdPercent)
             continue;
 
