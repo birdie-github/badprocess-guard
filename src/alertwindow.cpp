@@ -19,7 +19,6 @@
 #include <cstring>
 
 #ifdef BADPROCESS_GUARD_HAVE_X11
-#include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #endif
 
@@ -197,7 +196,10 @@ void AlertWindow::animateToContentHeight() {
         }
         show();
         raise();
-        applyAllWorkspacesHint();
+        // Some WMs only accept _NET_WM_STATE requests after the window has
+        // become managed.  Queue it rather than setting pre-map properties.
+        QTimer::singleShot(0, this, &AlertWindow::applyAllWorkspacesHint);
+        QTimer::singleShot(200, this, &AlertWindow::applyAllWorkspacesHint);
     }
 
     m_animation->stop();
@@ -259,10 +261,9 @@ void AlertWindow::positionSettingsButton() {
 }
 
 void AlertWindow::applyAllWorkspacesHint() {
-    if (!m_config || !m_config->allWorkspaces())
-        return;
-
 #ifdef BADPROCESS_GUARD_HAVE_X11
+    if (!m_config)
+        return;
     if (QGuiApplication::platformName() != QLatin1String("xcb"))
         return;
 
@@ -272,27 +273,9 @@ void AlertWindow::applyAllWorkspacesHint() {
 
     const Window window = static_cast<Window>(winId());
     const Window root = DefaultRootWindow(display);
-    const Atom desktopAtom = XInternAtom(display, "_NET_WM_DESKTOP", False);
-
-    if (desktopAtom != None) {
-        const unsigned long allDesktops = 0xFFFFFFFFUL;
-        XChangeProperty(display, window, desktopAtom, XA_CARDINAL,
-                        32, PropModeReplace,
-                        reinterpret_cast<const unsigned char *>(&allDesktops), 1);
-
-        XEvent event;
-        memset(&event, 0, sizeof(event));
-        event.xclient.type = ClientMessage;
-        event.xclient.window = window;
-        event.xclient.message_type = desktopAtom;
-        event.xclient.format = 32;
-        event.xclient.data.l[0] = static_cast<long>(allDesktops);
-        event.xclient.data.l[1] = 1; // normal application source indication
-        XSendEvent(display, root, False, SubstructureRedirectMask | SubstructureNotifyMask, &event);
-    }
-
     const Atom stateAtom = XInternAtom(display, "_NET_WM_STATE", False);
     const Atom stickyAtom = XInternAtom(display, "_NET_WM_STATE_STICKY", False);
+
     if (stateAtom != None && stickyAtom != None) {
         XEvent event;
         memset(&event, 0, sizeof(event));
@@ -300,14 +283,18 @@ void AlertWindow::applyAllWorkspacesHint() {
         event.xclient.window = window;
         event.xclient.message_type = stateAtom;
         event.xclient.format = 32;
-        event.xclient.data.l[0] = 1; // _NET_WM_STATE_ADD
+        event.xclient.data.l[0] = m_config->allWorkspaces() ? 1 : 0; // ADD : REMOVE
         event.xclient.data.l[1] = static_cast<long>(stickyAtom);
+        event.xclient.data.l[2] = 0;
         event.xclient.data.l[3] = 1; // normal application source indication
+        event.xclient.data.l[4] = 0;
         XSendEvent(display, root, False, SubstructureRedirectMask | SubstructureNotifyMask, &event);
     }
 
     XFlush(display);
     XCloseDisplay(display);
+#else
+    Q_UNUSED(this)
 #endif
 }
 

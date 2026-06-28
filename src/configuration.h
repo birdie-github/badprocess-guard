@@ -41,5 +41,5 @@ private:
     QFont m_customFont;
     QPoint m_windowPosition;
     bool m_hasWindowPosition = false;
-    bool m_allWorkspaces = true;
+    bool m_allWorkspaces = false;
 };

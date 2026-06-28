@@ -14,8 +14,11 @@ void Configuration::load() {
     m_opacityPercent = qBound(10, m_settings.value(QStringLiteral("appearance/opacityPercent"), 50).toInt(), 100);
     m_darkMode = m_settings.value(QStringLiteral("appearance/darkMode"), true).toBool();
     m_useCustomFont = m_settings.value(QStringLiteral("appearance/useCustomFont"), false).toBool();
+    // Default to false.  Enabling the X11 sticky-workspace hint should be an
+    // explicit user choice, not something that changes window placement merely
+    // because the program was upgraded.
     m_allWorkspaces = m_settings.value(QStringLiteral("window/AllWorkspaces"),
-                                       m_settings.value(QStringLiteral("AllWorkspaces"), true)).toBool();
+                                       m_settings.value(QStringLiteral("AllWorkspaces"), false)).toBool();
 
     const QString fontString = m_settings.value(QStringLiteral("appearance/customFont")).toString();
     if (!fontString.isEmpty())

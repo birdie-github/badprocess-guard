@@ -34,9 +34,11 @@ Useful setting without UI:
 AllWorkspaces=true
 ```
 
-On X11/XFCE this applies `_NET_WM_DESKTOP = 0xFFFFFFFF` plus the sticky EWMH
-state so the alert window appears on all workspaces. On Wayland this is not
-available generically.
+On X11/XFCE this applies the `_NET_WM_STATE_STICKY` EWMH state so the alert
+window appears on all workspaces. On Wayland this is not available generically.
+
+The default is `false`; enable it explicitly only if your window manager handles
+sticky tool windows correctly.
 
 ## Build
 
@@ -68,7 +70,7 @@ cmake --build build-qt6 -j$(nproc)
 - Linger duration after a normal sample: 3000 ms
 - Overlay opacity: 50%
 - Minimum configurable opacity: 10%
-- All X11 workspaces: enabled by default
+- All X11 workspaces: disabled by default
 
 CPU percentages are not divided by CPU count. 100% means one fully busy logical
 CPU; 200% means two logical CPUs, and so on.
