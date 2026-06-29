@@ -23,6 +23,9 @@ public:
     double treeThresholdPercent() const { return m_treeThresholdPercent; }
     double processThresholdPercent() const { return m_processThresholdPercent; }
 
+    void beginDeferredSave();
+    void endDeferredSave();
+
 public slots:
     void setOpacityPercent(int value);
     void setDarkMode(bool enabled);
@@ -30,6 +33,10 @@ public slots:
     void setCustomFont(const QFont &font);
     void setWindowPosition(const QPoint &pos);
     void setAllWorkspaces(bool enabled);
+    void setRefreshInterval(int ms);
+    void setAlertDuration(int ms);
+    void setTreeThresholdPercent(double percent);
+    void setProcessThresholdPercent(double percent);
 
 signals:
     void changed();
@@ -37,6 +44,7 @@ signals:
 private:
     void load();
     void save();
+    void scheduleSave();
 
     QSettings m_settings;
     int m_opacityPercent = 50;
@@ -50,4 +58,6 @@ private:
     int m_alertDuration = 3000;
     double m_treeThresholdPercent = 50.0;
     double m_processThresholdPercent = 50.0;
+    bool m_deferSaves = false;
+    bool m_hasDeferredSave = false;
 };

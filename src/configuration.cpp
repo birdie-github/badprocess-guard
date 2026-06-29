@@ -53,12 +53,32 @@ void Configuration::save() {
     m_settings.sync();
 }
 
+void Configuration::beginDeferredSave() {
+    m_deferSaves = true;
+}
+
+void Configuration::endDeferredSave() {
+    m_deferSaves = false;
+    if (m_hasDeferredSave) {
+        m_hasDeferredSave = false;
+        save();
+    }
+}
+
+void Configuration::scheduleSave() {
+    if (m_deferSaves) {
+        m_hasDeferredSave = true;
+        return;
+    }
+    save();
+}
+
 void Configuration::setOpacityPercent(int value) {
     value = qBound(10, value, 100);
     if (m_opacityPercent == value)
         return;
     m_opacityPercent = value;
-    save();
+    scheduleSave();
     emit changed();
 }
 
@@ -66,7 +86,7 @@ void Configuration::setDarkMode(bool enabled) {
     if (m_darkMode == enabled)
         return;
     m_darkMode = enabled;
-    save();
+    scheduleSave();
     emit changed();
 }
 
@@ -74,7 +94,7 @@ void Configuration::setUseCustomFont(bool enabled) {
     if (m_useCustomFont == enabled)
         return;
     m_useCustomFont = enabled;
-    save();
+    scheduleSave();
     emit changed();
 }
 
@@ -83,7 +103,7 @@ void Configuration::setCustomFont(const QFont &font) {
         return;
     m_customFont = font;
     m_useCustomFont = true;
-    save();
+    scheduleSave();
     emit changed();
 }
 
@@ -92,13 +112,48 @@ void Configuration::setWindowPosition(const QPoint &pos) {
         return;
     m_windowPosition = pos;
     m_hasWindowPosition = true;
-    save();
+    scheduleSave();
 }
 
 void Configuration::setAllWorkspaces(bool enabled) {
     if (m_allWorkspaces == enabled)
         return;
     m_allWorkspaces = enabled;
-    save();
+    scheduleSave();
+    emit changed();
+}
+void Configuration::setRefreshInterval(int ms) {
+    ms = qMax(250, ms);
+    if (m_refreshInterval == ms)
+        return;
+    m_refreshInterval = ms;
+    scheduleSave();
+    emit changed();
+}
+
+void Configuration::setAlertDuration(int ms) {
+    ms = qMax(0, ms);
+    if (m_alertDuration == ms)
+        return;
+    m_alertDuration = ms;
+    scheduleSave();
+    emit changed();
+}
+
+void Configuration::setTreeThresholdPercent(double percent) {
+    percent = qMax(0.0, percent);
+    if (qFuzzyCompare(m_treeThresholdPercent + 1.0, percent + 1.0))
+        return;
+    m_treeThresholdPercent = percent;
+    scheduleSave();
+    emit changed();
+}
+
+void Configuration::setProcessThresholdPercent(double percent) {
+    percent = qMax(0.0, percent);
+    if (qFuzzyCompare(m_processThresholdPercent + 1.0, percent + 1.0))
+        return;
+    m_processThresholdPercent = percent;
+    scheduleSave();
     emit changed();
 }

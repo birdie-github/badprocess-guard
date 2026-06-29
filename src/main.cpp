@@ -52,6 +52,13 @@ int main(int argc, char **argv) {
     monitor.setProcessThresholdPercent(parser.isSet(processThresholdOpt) ? parser.value(processThresholdOpt).toDouble() : config.processThresholdPercent());
     monitor.setLingerMs(parser.isSet(alertDurationOpt) ? parser.value(alertDurationOpt).toInt() : config.alertDuration());
     monitor.setDebugEnabled(parser.isSet(debugOpt));
+    QObject::connect(&config, &Configuration::changed, &monitor, [&config, &monitor] {
+        monitor.setIntervalMs(config.refreshInterval());
+        monitor.setTreeThresholdPercent(config.treeThresholdPercent());
+        monitor.setProcessThresholdPercent(config.processThresholdPercent());
+        monitor.setLingerMs(config.alertDuration());
+        monitor.refreshNow();
+    });
 
     AlertWindow window(&config);
     QObject::connect(&monitor, &ProcessMonitor::badProcessesChanged,

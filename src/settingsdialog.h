@@ -8,6 +8,8 @@ class QCheckBox;
 class QLabel;
 class QPushButton;
 class QSlider;
+class QSpinBox;
+class QDoubleSpinBox;
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
@@ -24,4 +26,9 @@ private:
     QCheckBox *m_darkMode = nullptr;
     QCheckBox *m_useCustomFont = nullptr;
     QPushButton *m_customFontButton = nullptr;
+    QSpinBox *m_refreshInterval = nullptr;
+    QSpinBox *m_alertDuration = nullptr;
+    QDoubleSpinBox *m_treeThreshold = nullptr;
+    QDoubleSpinBox *m_processThreshold = nullptr;
+    QCheckBox *m_allWorkspaces = nullptr;
 };
