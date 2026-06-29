@@ -2,14 +2,20 @@
 #include "configuration.h"
 #include "processmonitor.h"
 
+#include <QAction>
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QIcon>
+#include <QMenu>
+#include <QSystemTrayIcon>
 
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
+    QApplication::setQuitOnLastWindowClosed(false);
     QApplication::setApplicationName(QStringLiteral("badprocess-guard"));
     QApplication::setApplicationDisplayName(QStringLiteral("badprocess-guard"));
     QApplication::setOrganizationName(QStringLiteral("badprocess-guard"));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/gear_metallic.svg")));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Compact guard window for CPU-heavy process trees."));
@@ -52,6 +58,23 @@ int main(int argc, char **argv) {
                      &window, &AlertWindow::setBadProcesses);
     QObject::connect(&window, &AlertWindow::immediateRefreshRequested,
                      &monitor, &ProcessMonitor::refreshNow);
+
+    QMenu trayMenu;
+    QAction *settingsAction = trayMenu.addAction(QStringLiteral("Settings"));
+    QAction *exitAction = trayMenu.addAction(QStringLiteral("Exit"));
+
+    QSystemTrayIcon trayIcon(QIcon(QStringLiteral(":/icons/gear_metallic.svg")));
+    trayIcon.setToolTip(QStringLiteral("badprocess-guard"));
+    trayIcon.setContextMenu(&trayMenu);
+    QObject::connect(settingsAction, &QAction::triggered, &window, &AlertWindow::showSettings);
+    QObject::connect(exitAction, &QAction::triggered, &app, &QApplication::quit);
+    QObject::connect(&trayIcon, &QSystemTrayIcon::activated, &window,
+                     [&window](QSystemTrayIcon::ActivationReason reason) {
+                         if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick)
+                             window.showSettings();
+                     });
+    if (QSystemTrayIcon::isSystemTrayAvailable())
+        trayIcon.show();
 
     if (parser.isSet(testAlertOpt)) {
         QVector<BadProcess> fake;

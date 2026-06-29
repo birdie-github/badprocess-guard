@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(badprocess-guard VERSION 0.1.7 LANGUAGES CXX)
+project(badprocess-guard VERSION 0.1.8 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,16 +9,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(QT6_ENABLE "Build with Qt6 instead of Qt5" OFF)
 
 if(QT6_ENABLE)
-    find_package(Qt6 REQUIRED COMPONENTS Widgets)
+    find_package(Qt6 REQUIRED COMPONENTS Widgets Svg)
     set(QT_PACKAGE Qt6)
 else()
-    find_package(Qt5 REQUIRED COMPONENTS Widgets)
+    find_package(Qt5 REQUIRED COMPONENTS Widgets Svg)
     set(QT_PACKAGE Qt5)
 endif()
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC OFF)
-set(CMAKE_AUTORCC OFF)
+set(CMAKE_AUTORCC ON)
 
 add_executable(badprocess-guard
     src/main.cpp
@@ -32,9 +32,10 @@ add_executable(badprocess-guard
     src/alertwindow.h
     src/settingsdialog.cpp
     src/settingsdialog.h
+    resources/resources.qrc
 )
 
-target_link_libraries(badprocess-guard PRIVATE ${QT_PACKAGE}::Widgets)
+target_link_libraries(badprocess-guard PRIVATE ${QT_PACKAGE}::Widgets ${QT_PACKAGE}::Svg)
 
 if(NOT WIN32)
 find_package(X11 QUIET)
@@ -56,3 +57,5 @@ target_compile_options(badprocess-guard PRIVATE
 
 install(TARGETS badprocess-guard RUNTIME DESTINATION bin)
 install(FILES process-mapping.ini DESTINATION share/badprocess-guard)
+install(FILES resources/icons/gear_metallic.svg DESTINATION share/icons/hicolor/scalable/apps RENAME badprocess-guard.svg)
+install(FILES packaging/badprocess-guard.desktop DESTINATION share/applications)

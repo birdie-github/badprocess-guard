@@ -24,6 +24,7 @@ public:
 
 public slots:
     void setBadProcesses(const QVector<BadProcess> &processes);
+    void showSettings();
 
 signals:
     void immediateRefreshRequested();
@@ -38,7 +39,6 @@ protected:
 private:
     void applyConfiguration();
     void animateToContentHeight();
-    void showSettings();
     void confirmTerminate(const BadProcess &process);
     int contentHeightForRows(int rows) const;
     int contentWidth() const;

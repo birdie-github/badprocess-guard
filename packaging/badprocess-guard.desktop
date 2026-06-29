@@ -5,3 +5,4 @@ Comment=Guard against CPU-heavy process trees
 Exec=badprocess-guard
 Terminal=false
 Categories=Utility;System;Monitor;
+Icon=badprocess-guard
