@@ -66,7 +66,7 @@ AlertWindow::AlertWindow(Configuration *config, QWidget *parent)
     m_settingsButton->raise();
 
     m_animation = new QPropertyAnimation(this, QByteArrayLiteral("animatedHeight"), this);
-    m_animation->setDuration(180);
+    m_animation->setDuration(333);
     m_animation->setEasingCurve(QEasingCurve::OutCubic);
 
     connect(m_settingsButton, &QToolButton::clicked, this, &AlertWindow::showSettings);
