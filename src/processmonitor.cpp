@@ -343,17 +343,6 @@ void ProcessMonitor::loadProcessMapping() {
             break;
         }
     }
-
-    if (!loaded) {
-        // Last-resort minimal rules.  Normal builds ship process-mapping.ini,
-        // so these are only for accidental launches from unusual directories.
-        m_mapping.treeRoots.append({QStringLiteral("firefox"), QStringLiteral("Firefox")});
-        m_mapping.treeRoots.append({QStringLiteral("thunderbird"), QStringLiteral("Thunderbird")});
-        m_mapping.exactNames.insert(QStringLiteral("firefox"), QStringLiteral("Firefox"));
-        m_mapping.exactNames.insert(QStringLiteral("firefox-bin"), QStringLiteral("Firefox"));
-        m_mapping.exactNames.insert(QStringLiteral("thunderbird"), QStringLiteral("Thunderbird"));
-        m_mapping.exactNames.insert(QStringLiteral("thunderbird-bin"), QStringLiteral("Thunderbird"));
-    }
 }
 
 void ProcessMonitor::loadProcessMappingFile(const QString &path, bool *loaded) {
