@@ -16,10 +16,9 @@ class SettingsDialog : public QDialog {
 
 public:
     explicit SettingsDialog(Configuration *config, QWidget *parent = nullptr);
-
-private:
     void refreshFromConfig();
 
+private:
     Configuration *m_config = nullptr;
     QSlider *m_opacitySlider = nullptr;
     QLabel *m_opacityValue = nullptr;

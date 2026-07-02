@@ -11,6 +11,7 @@ Configuration::Configuration(QObject *parent)
 }
 
 void Configuration::load() {
+	m_hasWindowPosition = false;
     m_settings.beginGroup(QStringLiteral("Settings"));
 
     m_opacityPercent = qBound(10, m_settings.value(QStringLiteral("Opacity"), 50).toInt(), 100);
@@ -33,6 +34,30 @@ void Configuration::load() {
     }
 
     m_settings.endGroup();
+}
+
+void Configuration::saveWindowPosition()
+{
+    if (!m_hasWindowPosition)
+        return;
+
+    m_settings.beginGroup(QStringLiteral("Settings"));
+    m_settings.setValue(QStringLiteral("WindowX"), m_windowPosition.x());
+    m_settings.setValue(QStringLiteral("WindowY"), m_windowPosition.y());
+    m_settings.endGroup();
+    m_settings.sync();
+}
+
+void Configuration::reloadFromDiskPreservingWindowPosition()
+{
+    const QPoint windowPosition = m_windowPosition;
+    const bool hasWindowPosition = m_hasWindowPosition;
+
+    m_settings.sync();
+    load();
+    m_windowPosition = windowPosition;
+    m_hasWindowPosition = hasWindowPosition;
+    emit changed();
 }
 
 void Configuration::save() {
@@ -112,7 +137,7 @@ void Configuration::setWindowPosition(const QPoint &pos) {
         return;
     m_windowPosition = pos;
     m_hasWindowPosition = true;
-    scheduleSave();
+    saveWindowPosition();
 }
 
 void Configuration::setAllWorkspaces(bool enabled) {

@@ -22,6 +22,7 @@ public:
     int alertDuration() const { return m_alertDuration; }
     double treeThresholdPercent() const { return m_treeThresholdPercent; }
     double processThresholdPercent() const { return m_processThresholdPercent; }
+    void reloadFromDiskPreservingWindowPosition();
 
     void beginDeferredSave();
     void endDeferredSave();
@@ -44,6 +45,7 @@ signals:
 private:
     void load();
     void save();
+    void saveWindowPosition();
     void scheduleSave();
 
     QSettings m_settings;
