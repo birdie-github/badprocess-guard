@@ -438,9 +438,12 @@ QSet<int> ProcessMonitor::collectTreePids(int rootPid, const QHash<int, QVector<
 
 QVector<BadProcess> ProcessMonitor::measureBadProcesses(const Snapshot &before, const Snapshot &after, double elapsedSeconds) {
     QSet<ProcessIdentity> badTreeMembers;
-    QVector<BadProcess> bad = measureTrees(before, after, elapsedSeconds, &badTreeMembers);
+    QSet<ProcessIdentity> treeRootsSeen;
+    QVector<BadProcess> bad = measureTrees(before, after, elapsedSeconds, &badTreeMembers, &treeRootsSeen);
 
     for (const ProcessIdentity &member : badTreeMembers) {
+        if (treeRootsSeen.contains(member))
+            continue;
         m_recentProcesses.remove(member);
         m_recentLastSeenMs.remove(member);
     }
@@ -457,7 +460,9 @@ QVector<BadProcess> ProcessMonitor::measureBadProcesses(const Snapshot &before, 
     return bad;
 }
 
-QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const Snapshot &after, double elapsedSeconds, QSet<ProcessIdentity> *badTreeMembers) const {
+QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const Snapshot &after, double elapsedSeconds,
+                                                 QSet<ProcessIdentity> *badTreeMembers,
+                                                 QSet<ProcessIdentity> *treeRootsSeen) const {
     QHash<ProcessIdentity, ProcInfo> beforeById;
     for (const ProcInfo &info : before)
         beforeById.insert(info.id, info);
@@ -534,6 +539,9 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
 
         if (counted == 0)
             continue;
+
+        if (treeRootsSeen)
+            treeRootsSeen->insert(root.id);
 
         const double percent = cpuPercent(beforeTicks, afterTicks, elapsedSeconds, m_cpuUnitsPerSecond);
         if (m_debug) {

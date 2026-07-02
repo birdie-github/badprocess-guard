@@ -90,7 +90,9 @@ private:
     QVector<BadProcess> measureBadProcesses(const Snapshot &before, const Snapshot &after, double elapsedSeconds);
     QVector<BadProcess> applyLinger(const QVector<BadProcess> &current, qint64 nowMs, bool honorLinger);
     void sampleInternal(bool honorLinger);
-    QVector<BadProcess> measureTrees(const Snapshot &before, const Snapshot &after, double elapsedSeconds, QSet<ProcessIdentity> *badTreeMembers) const;
+    QVector<BadProcess> measureTrees(const Snapshot &before, const Snapshot &after, double elapsedSeconds,
+                                     QSet<ProcessIdentity> *badTreeMembers,
+                                     QSet<ProcessIdentity> *treeRootsSeen) const;
     QVector<BadProcess> measureLeaves(const Snapshot &before, const Snapshot &after, double elapsedSeconds, const QSet<ProcessIdentity> &suppressedMembers) const;
 
     QTimer m_timer;
