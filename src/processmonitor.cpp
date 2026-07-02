@@ -591,7 +591,7 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
             ++counted;
         }
 
-        if (!beforeById.contains(root.id))
+        if (counted == 0)
             continue;
 
         const double percent = cpuPercent(beforeTicks, afterTicks, elapsedSeconds, m_cpuUnitsPerSecond);
