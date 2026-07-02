@@ -1,6 +1,7 @@
 #include "alertwindow.h"
 
 #include <QApplication>
+#include <QFile>
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 #include <QDesktopWidget>
 #endif
@@ -27,6 +28,62 @@
 #else
 #include <signal.h>
 #endif
+
+
+static bool currentProcessIdentity(int pid, ProcessIdentity *identity) {
+    if (!identity || pid <= 0)
+        return false;
+
+#ifdef Q_OS_WIN
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, DWORD(pid));
+    if (!process)
+        process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, DWORD(pid));
+    if (!process)
+        return false;
+
+    FILETIME creationTime, exitTime, kernelTime, userTime;
+    const bool ok = GetProcessTimes(process, &creationTime, &exitTime, &kernelTime, &userTime) != 0;
+    CloseHandle(process);
+    if (!ok)
+        return false;
+
+    ULARGE_INTEGER ct;
+    ct.LowPart = creationTime.dwLowDateTime;
+    ct.HighPart = creationTime.dwHighDateTime;
+    identity->pid = pid;
+    identity->startTime = ct.QuadPart;
+    return true;
+#else
+    QFile statFile(QStringLiteral("/proc/%1/stat").arg(pid));
+    if (!statFile.open(QIODevice::ReadOnly | QIODevice::Text))
+        return false;
+
+    const QByteArray stat = statFile.readAll();
+    const int closeParen = stat.lastIndexOf(')');
+    if (closeParen < 0)
+        return false;
+
+    const QList<QByteArray> fields = stat.mid(closeParen + 2).split(' ');
+    // /proc/<pid>/stat field 22 is starttime.  After removing fields 1
+    // (pid) and 2 (comm), it is index 19 in the remaining list.
+    if (fields.size() <= 19)
+        return false;
+
+    bool ok = false;
+    const quint64 startTime = fields.at(19).toULongLong(&ok);
+    if (!ok)
+        return false;
+
+    identity->pid = pid;
+    identity->startTime = startTime;
+    return true;
+#endif
+}
+
+static bool isSameLiveProcess(const ProcessIdentity &expected) {
+    ProcessIdentity current;
+    return currentProcessIdentity(expected.pid, &current) && current == expected;
+}
 
 static QRect availableGeometryForWindow(QWidget *window) {
 #if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
@@ -237,22 +294,33 @@ void AlertWindow::confirmTerminate(const BadProcess &process) {
     box.addButton(QMessageBox::Cancel);
     box.exec();
 
+    const bool wantsTerminate = (box.clickedButton() == terminate);
+    const bool wantsKill = (box.clickedButton() == kill9);
     bool acted = false;
+
+    if (wantsTerminate || wantsKill) {
+        if (!isSameLiveProcess(process.root)) {
+            QMessageBox::warning(this,
+                                 QStringLiteral("Process changed"),
+                                 QStringLiteral("PID %1 no longer refers to the process shown in the alert. Nothing was terminated.").arg(process.root.pid));
+            emit immediateRefreshRequested();
+            return;
+        }
+
 #ifdef Q_OS_WIN
-    if (box.clickedButton() == terminate || box.clickedButton() == kill9) {
         HANDLE handle = OpenProcess(PROCESS_TERMINATE, FALSE, DWORD(process.root.pid));
         if (handle) {
             acted = TerminateProcess(handle, 1) != 0;
             CloseHandle(handle);
         }
-    }
 #else
-    if (box.clickedButton() == terminate) {
-        acted = (::kill(process.root.pid, SIGTERM) == 0);
-    } else if (box.clickedButton() == kill9) {
-        acted = (::kill(process.root.pid, SIGKILL) == 0);
-    }
+        if (wantsTerminate) {
+            acted = (::kill(process.root.pid, SIGTERM) == 0);
+        } else if (wantsKill) {
+            acted = (::kill(process.root.pid, SIGKILL) == 0);
+        }
 #endif
+    }
 
     if (acted) {
         QTimer::singleShot(120, this, [this] { emit immediateRefreshRequested(); });
