@@ -1,0 +1,530 @@
+# badprocess-guard project blueprint for continuing in a new chat
+
+Repository: https://github.com/birdie-github/badprocess-guard
+
+## One-line purpose
+
+`badprocess-guard` is a small Qt Widgets desktop utility that detects CPU-heavy processes and selected process trees, shows a compact translucent always-on-top alert overlay, and lets the user terminate/kill the offender.
+
+## Origin and design intent
+
+The project was created to catch cases such as DeepL pages in Firefox/Chrome silently keeping many browser helper processes lightly busy across multiple CPU cores, raising laptop heat and power consumption without an obvious single 100%-CPU process.
+
+The UI philosophy is strict minimalism:
+
+```text
+🛑 Chrome · 321158 · 95%
+```
+
+The row keeps only:
+
+- stop/terminate button
+- friendly app name
+- PID number
+- CPU percentage
+
+It intentionally does **not** show words like `PID` or `CPU`, does **not** show full command lines in the visible overlay, and avoids a title row.
+
+## Current technology stack
+
+- Language: C++17
+- GUI: Qt Widgets
+- Primary target: Qt5
+- Compatibility target: Qt6
+- Build: CMake
+- Tray icon: QtSvg resource embedded from `resources/resources.qrc`
+- Linux monitor backend: `/proc`
+- Windows monitor backend: ToolHelp snapshot + `GetProcessTimes`
+- Linux process actions: `SIGTERM` / `SIGKILL`
+- Windows process action: `TerminateProcess`
+- X11-only workspace feature: `_NET_WM_STATE_STICKY`
+- Wayland: no special workspace/click-through features
+
+## Important CPU semantics
+
+CPU percentage must be normalized as:
+
+```text
+100% = one fully busy logical CPU
+200% = two fully busy logical CPUs
+```
+
+Do **not** normalize by total CPU count like Windows Task Manager. The same semantics are used on Linux and Windows.
+
+Linux:
+
+- read `/proc/<pid>/stat`
+- use `utime + stime`
+- divide by `sysconf(_SC_CLK_TCK)` and elapsed wall time
+
+Windows:
+
+- enumerate processes with `CreateToolhelp32Snapshot`
+- read CPU times via `GetProcessTimes`
+- use 100 ns units
+- do not divide by CPU count
+
+## Core files
+
+```text
+CMakeLists.txt
+README.md
+process-mapping.ini
+resources/resources.qrc
+resources/icons/gear_metallic.svg
+packaging/badprocess-guard.desktop
+
+src/main.cpp
+src/configuration.h
+src/configuration.cpp
+src/processmonitor.h
+src/processmonitor.cpp
+src/alertwindow.h
+src/alertwindow.cpp
+src/processentrywidget.h
+src/processentrywidget.cpp
+src/settingsdialog.h
+src/settingsdialog.cpp
+```
+
+## High-level architecture
+
+### `Configuration`
+
+Owns persistent settings through `QSettings` in INI format.
+
+Path:
+
+```text
+~/.config/badprocess-guard/badprocess-guard.ini
+```
+
+Current schema:
+
+```ini
+[Settings]
+RefreshInterval=5000
+AlertDuration=3000
+Opacity=50
+DarkMode=true
+Font=
+AllWorkspaces=false
+TreeThreshold=50
+ProcessThreshold=50
+WindowX=<optional>
+WindowY=<optional>
+```
+
+Important rules:
+
+- Root section is `[Settings]`, not `[General]`.
+- `RefreshInterval` and `AlertDuration` are milliseconds.
+- `Font=` empty means default font.
+- Non-empty `Font=` stores Qt's serialized `QFont`.
+- No old-key migration path is desired.
+- Settings dialog updates live state immediately but defers writing to INI until the dialog closes.
+- Opacity is real opacity, not transparency: range 10–100.
+
+### `ProcessMonitor`
+
+Responsible for:
+
+- process enumeration
+- CPU delta accounting
+- building parent-child tree
+- loading process mapping rules
+- aggregating selected tree roots
+- identifying individual hot processes
+- applying alert duration / linger behavior
+- emitting `badProcessesChanged(QVector<BadProcess>)`
+
+Important structs:
+
+```cpp
+struct ProcessIdentity {
+    int pid;
+    quint64 startTime;
+};
+```
+
+Process identity uses PID + start time to avoid PID reuse bugs.
+
+```cpp
+struct BadProcess {
+    QString label;
+    ProcessIdentity root;
+    QString command;
+    double cpuPercent;
+    int processCount;
+};
+```
+
+### `AlertWindow`
+
+Frameless translucent overlay.
+
+Important behavior:
+
+- `Qt::FramelessWindowHint`
+- `Qt::Tool`
+- `Qt::WindowStaysOnTopHint`
+- `WA_TranslucentBackground`
+- rounded background painted manually
+- background alpha controlled by `Opacity`
+- text/buttons remain fully opaque
+- expands/shrinks vertically using `QPropertyAnimation`
+- dynamic width based on current row text/font
+- remembers dragged position
+- settings gear lives inside the alert window
+- visible only while there are bad entries or alert-duration lingering entries
+
+Actions:
+
+- Stop button opens confirmation dialog.
+- Linux: `Terminate` = `SIGTERM`, `Kill -9` = `SIGKILL`.
+- Windows: uses `TerminateProcess`.
+- After terminate/kill, monitor refreshes immediately, bypassing both normal refresh interval and alert duration.
+
+### `ProcessEntryWidget`
+
+One compact row.
+
+Visible text format:
+
+```text
+🛑 <Label> · <PID> · <rounded CPU>%
+```
+
+Tooltip may contain full command, PID, CPU, and process count.
+
+### `SettingsDialog`
+
+Non-modal settings dialog opened from overlay gear or tray menu.
+
+Contains:
+
+- Opacity slider, range 10–100
+- Refresh interval spinbox, milliseconds
+- Alert duration spinbox, milliseconds
+- Tree threshold spinbox, percent
+- Process threshold spinbox, percent
+- Dark mode checkbox
+- Use custom font checkbox
+- Custom font button using `QFontDialog`
+- All Workspaces checkbox shown only under X11 / `xcb`
+
+The dialog calls `Configuration::beginDeferredSave()` when opened and `endDeferredSave()` when closed so the INI is not rewritten hundreds of times while the user drags sliders/spinboxes.
+
+### Tray support
+
+System tray icon exists.
+
+Tray menu must have only:
+
+```text
+Settings
+Exit
+```
+
+Single/double click on the tray icon opens Settings.
+
+Tray icon uses embedded SVG. The SVG had to be flattened because QtSvg had trouble with `<symbol>` / `<use href="#gear">` references.
+
+## Process mapping
+
+Friendly names and aggregate roots live in:
+
+```text
+process-mapping.ini
+```
+
+Installed/bundled search must include:
+
+```text
+~/.config/badprocess-guard/process-mapping.ini
+<application dir>/process-mapping.ini
+<application dir>/../process-mapping.ini
+<application dir>/../share/badprocess-guard/process-mapping.ini
+/usr/share/badprocess-guard/process-mapping.ini
+/usr/local/share/badprocess-guard/process-mapping.ini
+```
+
+Important fixed bug: using `QStandardPaths::AppConfigLocation` alone produced:
+
+```text
+~/.config/badprocess-guard/badprocess-guard/process-mapping.ini
+```
+
+which was wrong. The correct primary user path is:
+
+```text
+~/.config/badprocess-guard/process-mapping.ini
+```
+
+Mapping format:
+
+```ini
+[tree-roots]
+firefox=Firefox
+firefox.exe=Firefox
+thunderbird=Thunderbird
+thunderbird.exe=Thunderbird
+chrome=Chrome
+chrome.exe=Chrome
+
+[exact]
+firefox=Firefox
+firefox.exe=Firefox
+firefox-bin=Firefox
+thunderbird=Thunderbird
+thunderbird.exe=Thunderbird
+thunderbird-bin=Thunderbird
+chrome=Chrome
+chrome.exe=Chrome
+chrome_crashpad_handler=Chrome
+chrome_crashpad_handler.exe=Chrome
+7z=7-Zip
+7z.exe=7-Zip
+wrapper-2.0=XFCE Panel Plugin
+
+[contains]
+libdatetime.so=DateTime
+libcpugraph.so=CPU Graph
+...
+```
+
+Rules are deliberately simple:
+
+- no regex
+- no shell expansion
+- no command execution
+- `[tree-roots]`: executable basename to aggregate
+- `[exact]`: executable basename to friendly name
+- `[contains]`: literal full-command substring to friendly name
+
+Display name resolution:
+
+```text
+exact basename -> contains substring -> raw executable basename
+```
+
+## Recent Chrome/Chromium bug and current intended fix
+
+Chrome uses the same executable basename, `chrome`, for the browser process and many helper processes. Some hot descendants looked like:
+
+```text
+/opt/google/chrome/chrome --type=zygote ...
+```
+
+The app originally treated every `chrome` process as a potential root or as an individual hot process, producing duplicate rows such as:
+
+```text
+Chrome · 321158 · 95%
+Chrome · 320601 · 60%
+```
+
+Current intended behavior:
+
+- configured Chromium-family basename such as `chrome` should become one aggregate alert
+- all matching `chrome` processes should be included in the aggregate
+- helper processes should not produce separate generic per-process alerts
+- per-process alerts for members of a configured process tree should be suppressed even if the aggregate tree is momentarily below `TreeThreshold`, otherwise lingered aggregate rows can coexist with newly measured hot children
+
+Current Chromium-family base detection includes:
+
+```text
+chrome
+chrome.exe
+chromium
+chromium-browser
+chromium.exe
+msedge
+msedge.exe
+brave
+brave-browser
+brave.exe
+vivaldi
+vivaldi-bin
+vivaldi.exe
+```
+
+A helper process is currently identified by an argv element beginning with:
+
+```text
+--type=
+```
+
+Representative process selection should prefer the non-helper browser process when available. Avoid keeping raw pointers into `QHash` iteration state; copy the representative `ProcInfo`.
+
+## Alert duration / linger semantics
+
+Every normal sample computes the current bad-process list.
+
+If a process/tree was bad and then falls below threshold, it remains visible for `AlertDuration` milliseconds.
+
+Immediate refreshes after terminate/kill bypass alert duration.
+
+`honorLinger` / `honor-duration` in debug output indicates whether alert duration is being applied.
+
+## Threshold semantics
+
+Two independent thresholds:
+
+```ini
+TreeThreshold=50
+ProcessThreshold=50
+```
+
+- Tree threshold applies to configured `[tree-roots]` aggregates.
+- Process threshold applies to all remaining individual processes.
+- For configured tree members, individual per-process alerts should be suppressed so Firefox/Chrome/Thunderbird do not produce random child rows.
+
+## X11 all-workspaces behavior
+
+Setting:
+
+```ini
+AllWorkspaces=true
+```
+
+This is X11/XFCE-only.
+
+Implementation should apply `_NET_WM_STATE_STICKY`, not `_NET_WM_DESKTOP = 0xFFFFFFFF`.
+
+The feature defaults to false.
+
+On Windows and Wayland, ignore it.
+
+## Click-through idea
+
+A click-through window except for the stop/settings buttons was discussed and rejected for now.
+
+Reason:
+
+- Qt-only `WA_TransparentForMouseEvents` is too blunt and disables the buttons too.
+- Correct implementation is platform-specific:
+  - X11 input shape region
+  - Windows `WM_NCHITTEST`
+  - Wayland generally not supported
+- Not worth the complexity at this stage.
+
+## Build instructions
+
+Qt5:
+
+```bash
+cmake -S . -B build
+cmake --build build -j$(nproc)
+```
+
+Qt6:
+
+```bash
+cmake -S . -B build-qt6 -DQT6_ENABLE=ON
+cmake --build build-qt6 -j$(nproc)
+```
+
+Useful runtime tests:
+
+```bash
+./build/badprocess-guard --debug
+./build/badprocess-guard --debug --tree-threshold 1 --process-threshold 1
+./build/badprocess-guard --test-alert
+./build/badprocess-guard --refresh-interval 1500 --alert-duration 3000
+```
+
+## Debug output expectations
+
+Startup debug line includes:
+
+```text
+initial snapshot: <N> processes, interval=<ms> ms, tree-threshold=<x>%, process-threshold=<y>%, tree-roots=<n>, exact-mappings=<n>, contains-mappings=<n>
+```
+
+Tree debug line:
+
+```text
+tree root Chrome pid=<pid> cpu=<percent>% counted=<count> command=<command>
+```
+
+Process debug line:
+
+```text
+process <label> pid=<pid> cpu=<percent>% command=<command>
+```
+
+Sample debug line:
+
+```text
+sample: <N> processes scanned, elapsed=<sec>s, alert-duration=<ms> ms, honor-duration=<true|false>, bad=[...]
+```
+
+If mappings fail to load, `tree-roots` and `exact-mappings` will be suspiciously low.
+
+## Known design preferences
+
+- User prefers explicit readable names over terse Unix-style abbreviations.
+- Project name is `badprocess-guard`, not `badproc`, not `hud`.
+- “Guard” is intentional because the app can terminate processes.
+- Keep UI compact and non-task-manager-like.
+- Avoid overengineering and fragile platform-specific features unless they clearly solve a real problem.
+- Avoid hardcoded friendly names in C++ when an external mapping file can handle them.
+- Prefer simple literal matching over regex for safety/predictability.
+- No migration layers unless explicitly requested; clean schemas are preferred.
+
+## Likely future fix areas
+
+Potential areas that may need more work:
+
+1. **Chromium aggregation correctness**
+   - The current “aggregate all matching `chrome` basenames” is pragmatic.
+   - It may merge separate Chrome profiles/windows if multiple independent Chrome roots are running.
+   - Better future design may use parent/ancestor relationships and Chromium command-line semantics more carefully.
+   - However, avoid showing helper duplicates.
+
+2. **Per-tree suppression semantics**
+   - Current intent is: if a process belongs to a configured tree, do not show it as a generic process.
+   - This reduces noise but may hide a child when the aggregate tree is below threshold.
+   - This is intentional for browsers/mail clients unless revisited.
+
+3. **Mapping search debug**
+   - It may be useful to print every tried mapping path under `--debug`.
+
+4. **Linux and Windows backend split**
+   - Process monitor currently has platform code inside `processmonitor.cpp`.
+   - Could eventually split into per-platform backend files for maintainability.
+
+5. **Chrome root representative**
+   - Prefer displaying real browser root, not `--type=zygote`.
+   - If current representative still shows a zygote command, improve selection logic.
+
+6. **Tray/menu behavior**
+   - Keep menu strictly two entries: Settings, Exit.
+
+7. **Settings writes**
+   - Ensure settings are written once on dialog close, not continuously during slider/spinbox changes.
+
+## Suggested opening prompt for a new chat
+
+Use this when continuing in a new conversation:
+
+```text
+I am continuing development of badprocess-guard:
+
+Repository: https://github.com/birdie-github/badprocess-guard
+
+Please first read the current repository state. Treat GitHub as the source of truth, not older tarballs or memory. The project is a Qt5/Qt6 C++17 Widgets app that monitors high-CPU processes and configured process trees, shows a compact translucent overlay, and lets me terminate/kill offenders.
+
+Important design constraints:
+- CPU percent semantics: 100% = one fully busy logical CPU, not whole-machine normalized.
+- Visible row format should stay compact: icon, app name, PID number, CPU percent. No full command line, no words PID/CPU.
+- Settings live in `~/.config/badprocess-guard/badprocess-guard.ini`, section `[Settings]`.
+- Process mapping lives in `~/.config/badprocess-guard/process-mapping.ini` or bundled `process-mapping.ini`.
+- Friendly names and tree roots should come from `process-mapping.ini`, not hardcoded UI strings.
+- Tray menu must only have Settings and Exit.
+- `AllWorkspaces` is X11-only and should use `_NET_WM_STATE_STICKY`; ignore it elsewhere.
+- Do not implement click-through overlay for now.
+- Do not add migration paths unless I explicitly ask.
+
+Before coding, inspect the current source and explain what you think needs changing. If I ask for a fix, prefer a small unified diff patch against the GitHub state.
+```
