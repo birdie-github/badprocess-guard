@@ -547,7 +547,8 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
             badTreeMembers->insert(member);
 
         if (percent >= m_treeThresholdPercent) {
-            bad.append({label, root.id, commandOf(root), percent, counted});
+//            bad.append({label, root.id, commandOf(root), percent, counted});
+            bad.append({label, root.id, label, percent, counted});
         }
     }
 
