@@ -30,6 +30,39 @@
 #endif
 
 
+
+#ifdef Q_OS_WIN
+struct CloseWindowContext {
+    DWORD pid = 0;
+    int posted = 0;
+};
+
+static BOOL CALLBACK postCloseToProcessWindow(HWND hwnd, LPARAM lParam) {
+    auto *context = reinterpret_cast<CloseWindowContext *>(lParam);
+    DWORD ownerPid = 0;
+    GetWindowThreadProcessId(hwnd, &ownerPid);
+    if (ownerPid != context->pid)
+        return TRUE;
+
+    // Only target real top-level windows.  Owned popup/tool windows normally
+    // close with their owner, and sending WM_CLOSE to them first can produce
+    // odd application-specific behavior.
+    if (GetWindow(hwnd, GW_OWNER) != nullptr)
+        return TRUE;
+
+    if (PostMessageW(hwnd, WM_CLOSE, 0, 0))
+        ++context->posted;
+    return TRUE;
+}
+
+static bool requestCloseWindows(int pid) {
+    CloseWindowContext context;
+    context.pid = DWORD(pid);
+    EnumWindows(postCloseToProcessWindow, reinterpret_cast<LPARAM>(&context));
+    return context.posted > 0;
+}
+#endif
+
 static bool currentProcessIdentity(int pid, ProcessIdentity *identity) {
     if (!identity || pid <= 0)
         return false;
@@ -284,37 +317,54 @@ void AlertWindow::showSettings() {
 
 void AlertWindow::confirmTerminate(const BadProcess &process) {
     QMessageBox box(this);
-    box.setWindowTitle(QStringLiteral("Terminate application?"));
-    box.setText(QStringLiteral("Terminate %1 PID %2?").arg(process.label).arg(process.root.pid));
-    box.setInformativeText(QStringLiteral("%1\n\nCPU tree: %2%")
+    box.setWindowTitle(QStringLiteral("Close or kill application?"));
+    box.setText(QStringLiteral("Close or kill %1 PID %2?").arg(process.label).arg(process.root.pid));
+#ifdef Q_OS_WIN
+    box.setInformativeText(QStringLiteral("%1\n\nCPU tree: %2%\n\nClose: asks the application's top-level windows to close.\nKill: forcibly terminates the process with TerminateProcess().")
                                .arg(process.command)
                                .arg(process.cpuPercent, 0, 'f', 1));
-    QPushButton *terminate = box.addButton(QStringLiteral("Terminate"), QMessageBox::AcceptRole);
-    QPushButton *kill9 = box.addButton(QStringLiteral("Kill -9"), QMessageBox::DestructiveRole);
+#else
+    box.setInformativeText(QStringLiteral("%1\n\nCPU tree: %2%\n\nClose: sends SIGTERM to the process.\nKill: sends SIGKILL to the process.")
+                               .arg(process.command)
+                               .arg(process.cpuPercent, 0, 'f', 1));
+#endif
+    QPushButton *close = box.addButton(QStringLiteral("Close"), QMessageBox::AcceptRole);
+    QPushButton *kill = box.addButton(QStringLiteral("Kill"), QMessageBox::DestructiveRole);
+#ifdef Q_OS_WIN
+    close->setToolTip(QStringLiteral("Post WM_CLOSE to top-level windows owned by this PID."));
+    kill->setToolTip(QStringLiteral("Forcibly terminate this PID with TerminateProcess()."));
+#else
+    close->setToolTip(QStringLiteral("Send SIGTERM to this PID."));
+    kill->setToolTip(QStringLiteral("Send SIGKILL to this PID."));
+#endif
     box.addButton(QMessageBox::Cancel);
     box.exec();
 
-    const bool wantsTerminate = (box.clickedButton() == terminate);
-    const bool wantsKill = (box.clickedButton() == kill9);
+    const bool wantsClose = (box.clickedButton() == close);
+    const bool wantsKill = (box.clickedButton() == kill);
     bool acted = false;
 
-    if (wantsTerminate || wantsKill) {
+    if (wantsClose || wantsKill) {
         if (!isSameLiveProcess(process.root)) {
             QMessageBox::warning(this,
                                  QStringLiteral("Process changed"),
-                                 QStringLiteral("PID %1 no longer refers to the process shown in the alert. Nothing was terminated.").arg(process.root.pid));
+                                 QStringLiteral("PID %1 no longer refers to the process shown in the alert. Nothing was closed or killed.").arg(process.root.pid));
             emit immediateRefreshRequested();
             return;
         }
 
 #ifdef Q_OS_WIN
-        HANDLE handle = OpenProcess(PROCESS_TERMINATE, FALSE, DWORD(process.root.pid));
-        if (handle) {
-            acted = TerminateProcess(handle, 1) != 0;
-            CloseHandle(handle);
+        if (wantsClose) {
+            acted = requestCloseWindows(process.root.pid);
+        } else if (wantsKill) {
+            HANDLE handle = OpenProcess(PROCESS_TERMINATE, FALSE, DWORD(process.root.pid));
+            if (handle) {
+                acted = TerminateProcess(handle, 1) != 0;
+                CloseHandle(handle);
+            }
         }
 #else
-        if (wantsTerminate) {
+        if (wantsClose) {
             acted = (::kill(process.root.pid, SIGTERM) == 0);
         } else if (wantsKill) {
             acted = (::kill(process.root.pid, SIGKILL) == 0);

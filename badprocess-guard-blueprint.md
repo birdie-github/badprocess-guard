@@ -59,7 +59,7 @@ where Processes indicates the number of aggregated processes represented by the 
 - Linux monitor backend: `/proc`
 - Windows monitor backend: ToolHelp snapshot + `GetProcessTimes`
 - Linux process actions: `SIGTERM` / `SIGKILL`
-- Windows process action: `TerminateProcess`
+- Windows process actions: Close posts `WM_CLOSE` to top-level windows owned by the PID; Kill uses `TerminateProcess`
 - X11-only workspace feature: `_NET_WM_STATE_STICKY`
 - Wayland: no special workspace/click-through features
 
@@ -204,8 +204,8 @@ Important behavior:
 Actions:
 
 - Stop button opens confirmation dialog.
-- Linux: `Terminate` = `SIGTERM`, `Kill -9` = `SIGKILL`.
-- Windows: uses `TerminateProcess`.
+- Linux: `Close` = `SIGTERM`, `Kill` = `SIGKILL`.
+- Windows: `Close` posts `WM_CLOSE` to top-level windows owned by the PID; `Kill` uses `TerminateProcess`.
 - After terminate/kill, monitor refreshes immediately, bypassing both normal refresh interval and alert duration.
 
 ### `ProcessEntryWidget`

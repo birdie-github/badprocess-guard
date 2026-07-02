@@ -19,11 +19,11 @@ individually.
 
 The stop button opens a confirmation dialog with:
 
-- Linux: Terminate = `SIGTERM`, Kill -9 = `SIGKILL`
-- Windows: termination uses `TerminateProcess`
+- Linux: Close = `SIGTERM`, Kill = `SIGKILL`
+- Windows: Close posts `WM_CLOSE` to the process's top-level windows; Kill uses `TerminateProcess`
 - Cancel
 
-After Terminate or Kill -9, the monitor performs immediate refreshes that bypass
+After Close or Kill, the monitor performs immediate refreshes that bypass
 both the normal sampling interval and the alert duration.
 
 Settings are stored in:

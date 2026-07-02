@@ -9,7 +9,7 @@ ProcessEntryWidget::ProcessEntryWidget(QWidget *parent) : QWidget(parent) {
 
     m_stopButton = new QToolButton(this);
     m_stopButton->setText(QStringLiteral("🛑"));
-    m_stopButton->setToolTip(QStringLiteral("Terminate process tree"));
+    m_stopButton->setToolTip(QStringLiteral("Close or kill this process"));
     m_stopButton->setAutoRaise(true);
     m_stopButton->setCursor(Qt::PointingHandCursor);
     m_stopButton->setFixedSize(20, 20);
