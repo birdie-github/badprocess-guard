@@ -301,8 +301,25 @@ bool ProcessMonitor::readProc(int pid, ProcInfo *info) {
 }
 
 QString ProcessMonitor::basenameOfArgv0(const ProcInfo &info) {
-    if (!info.argv.isEmpty())
-        return QFileInfo(info.argv.first()).fileName();
+    if (!info.argv.isEmpty()) {
+        QString argv0 = info.argv.first().trimmed();
+
+        // /proc/<pid>/cmdline is normally NUL-separated, but be defensive:
+        // if argv[0] somehow arrives as a full command line, QFileInfo() would
+        // otherwise use the last slash in an option value, e.g.
+        // --disk-cache-dir=/tmp/.chrome-cache, and display ".chrome-cache ...".
+        int firstSpace = -1;
+        for (int i = 0; i < argv0.size(); ++i) {
+            if (argv0.at(i).isSpace()) {
+                firstSpace = i;
+                break;
+            }
+        }
+        if (firstSpace > 0)
+            argv0 = argv0.left(firstSpace);
+
+        return QFileInfo(argv0).fileName();
+    }
     return info.comm;
 }
 
@@ -450,27 +467,12 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
         return QString();
     };
 
-    auto isChromiumBase = [](const QString &base) -> bool {
-        const QString lower = base.toLower();
-        return lower == QLatin1String("chrome") ||
-               lower == QLatin1String("chrome.exe") ||
-               lower == QLatin1String("chromium") ||
-               lower == QLatin1String("chromium-browser") ||
-               lower == QLatin1String("chromium.exe") ||
-               lower == QLatin1String("msedge") ||
-               lower == QLatin1String("msedge.exe") ||
-               lower == QLatin1String("brave") ||
-               lower == QLatin1String("brave-browser") ||
-               lower == QLatin1String("brave.exe") ||
-               lower == QLatin1String("vivaldi") ||
-               lower == QLatin1String("vivaldi-bin") ||
-               lower == QLatin1String("vivaldi.exe");
-    };
-
-    auto isChromiumHelper = [](const ProcInfo &info) -> bool {
+    auto hasChromiumStyleTypeArgument = [](const ProcInfo &info) -> bool {
         for (const QString &arg : info.argv) {
-            if (arg.startsWith(QLatin1String("--type=")))
+            if (arg.startsWith(QLatin1String("--type=")) ||
+                arg.contains(QLatin1String(" --type="))) {
                 return true;
+            }
         }
         return false;
     };
@@ -490,74 +492,18 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
         return false;
     };
 
-    QSet<QString> chromiumRootBasesHandled;
-    for (const RootRule &rule : m_mapping.treeRoots) {
-        const QString rootBase = rule.executableBasename;
-        if (!isChromiumBase(rootBase) || chromiumRootBasesHandled.contains(rootBase))
-            continue;
-        chromiumRootBasesHandled.insert(rootBase);
-
-        quint64 beforeTicks = 0;
-        quint64 afterTicks = 0;
-        int counted = 0;
-        QSet<ProcessIdentity> members;
-        ProcInfo representative;
-        bool haveRepresentative = false;
-
-        for (const ProcInfo &process : after) {
-            if (basenameOfArgv0(process) != rootBase)
-                continue;
-
-            const auto beforeIt = beforeById.constFind(process.id);
-            if (beforeIt == beforeById.constEnd())
-                continue;
-
-            beforeTicks += beforeIt->cpuTicks;
-            afterTicks += process.cpuTicks;
-            members.insert(process.id);
-            ++counted;
-
-            // Prefer the actual browser process over Chromium helper processes.
-            // Store a copy rather than a pointer into QHash iteration state.
-            if (!haveRepresentative || (!isChromiumHelper(process) && isChromiumHelper(representative))) {
-                representative = process;
-                haveRepresentative = true;
-            }
-        }
-
-        if (!haveRepresentative || counted == 0)
-            continue;
-
-        // Suppress generic per-process alerts for configured Chromium-family
-        // members even when the aggregate tree is just below the tree threshold.
-        // Otherwise a lingering tree alert can coexist with a newly measured
-        // hot helper, producing duplicate "Chrome" rows.
-        for (const ProcessIdentity &member : members)
-            badTreeMembers->insert(member);
-
-        const double percent = cpuPercent(beforeTicks, afterTicks, elapsedSeconds, m_cpuUnitsPerSecond);
-        if (m_debug) {
-            qInfo().noquote() << QStringLiteral("badprocess-guard: tree root %1 pid=%2 cpu=%3% counted=%4 command=%5")
-                                 .arg(rule.label)
-                                 .arg(representative.id.pid)
-                                 .arg(percent, 0, 'f', 1)
-                                 .arg(counted)
-                                 .arg(commandOf(representative));
-        }
-
-        if (percent >= m_treeThresholdPercent) {
-            bad.append({rule.label, representative.id, commandOf(representative), percent, counted});
-        }
-    }
-
     for (const ProcInfo &root : after) {
         const QString base = basenameOfArgv0(root);
-        if (chromiumRootBasesHandled.contains(base))
-            continue;
 
         const QString label = rootLabelForBase(base);
         if (label.isEmpty())
             continue;
+
+        // Chromium-family helper processes reuse the browser executable
+        // basename ("chrome") but advertise their role via --type=...
+        if (hasChromiumStyleTypeArgument(root))
+            continue;
+
         if (hasConfiguredRootAncestor(root))
             continue;
 
