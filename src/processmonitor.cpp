@@ -439,6 +439,12 @@ QSet<int> ProcessMonitor::collectTreePids(int rootPid, const QHash<int, QVector<
 QVector<BadProcess> ProcessMonitor::measureBadProcesses(const Snapshot &before, const Snapshot &after, double elapsedSeconds) {
     QSet<ProcessIdentity> badTreeMembers;
     QVector<BadProcess> bad = measureTrees(before, after, elapsedSeconds, &badTreeMembers);
+
+    for (const ProcessIdentity &member : badTreeMembers) {
+        m_recentProcesses.remove(member);
+        m_recentLastSeenMs.remove(member);
+    }
+
     const QVector<BadProcess> leaves = measureLeaves(before, after, elapsedSeconds, badTreeMembers);
     for (const BadProcess &leaf : leaves)
         bad.append(leaf);
