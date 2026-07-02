@@ -7,6 +7,7 @@
 #include <QSet>
 #include <QStringList>
 #include <QPair>
+#include <QElapsedTimer>
 
 struct ProcessIdentity {
     int pid = -1;
@@ -54,6 +55,7 @@ signals:
 
 private slots:
     void sample();
+    void expireLinger();
 
 private:
     struct ProcInfo {
@@ -90,12 +92,17 @@ private:
     QVector<BadProcess> measureBadProcesses(const Snapshot &before, const Snapshot &after, double elapsedSeconds);
     QVector<BadProcess> applyLinger(const QVector<BadProcess> &current, qint64 nowMs, bool honorLinger);
     void sampleInternal(bool honorLinger);
+    void emitIfChanged(const QVector<BadProcess> &bad);
+    void scheduleExpiryTimer(qint64 nowMs);
+    qint64 monotonicMs() const;
     QVector<BadProcess> measureTrees(const Snapshot &before, const Snapshot &after, double elapsedSeconds,
                                      QSet<ProcessIdentity> *badTreeMembers,
                                      QSet<ProcessIdentity> *treeRootsSeen) const;
     QVector<BadProcess> measureLeaves(const Snapshot &before, const Snapshot &after, double elapsedSeconds, const QSet<ProcessIdentity> &suppressedMembers) const;
 
     QTimer m_timer;
+    QTimer m_expiryTimer;
+    QElapsedTimer m_clock;
     Snapshot m_previous;
     qint64 m_previousNs = 0;
     double m_cpuUnitsPerSecond = 100.0;

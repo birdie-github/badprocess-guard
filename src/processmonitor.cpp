@@ -1,7 +1,6 @@
 #include "processmonitor.h"
 
 #include <QCoreApplication>
-#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -11,6 +10,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -43,11 +43,16 @@ ProcessMonitor::ProcessMonitor(QObject *parent) : QObject(parent) {
 
     m_timer.setInterval(m_intervalMs);
     connect(&m_timer, &QTimer::timeout, this, &ProcessMonitor::sample);
+
+    m_expiryTimer.setSingleShot(true);
+    connect(&m_expiryTimer, &QTimer::timeout, this, &ProcessMonitor::expireLinger);
 }
 
 void ProcessMonitor::start() {
+    if (!m_clock.isValid())
+        m_clock.start();
     m_previous = readSnapshot();
-    m_previousNs = QDateTime::currentMSecsSinceEpoch() * 1000000LL;
+    m_previousNs = m_clock.nsecsElapsed();
     if (m_debug) {
         qInfo().noquote() << QStringLiteral("badprocess-guard: initial snapshot: %1 processes, interval=%2 ms, tree-threshold=%3%, process-threshold=%4%, tree-roots=%5, exact-mappings=%6, contains-mappings=%7")
                              .arg(m_previous.size())
@@ -76,6 +81,7 @@ void ProcessMonitor::setProcessThresholdPercent(double percent) {
 
 void ProcessMonitor::setLingerMs(int ms) {
     m_lingerMs = qMax(0, ms);
+    scheduleExpiryTimer(monotonicMs());
 }
 
 void ProcessMonitor::refreshNow() {
@@ -91,8 +97,11 @@ void ProcessMonitor::sample() {
 }
 
 void ProcessMonitor::sampleInternal(bool honorLinger) {
+    if (!m_clock.isValid())
+        m_clock.start();
+
     const Snapshot current = readSnapshot();
-    const qint64 nowNs = QDateTime::currentMSecsSinceEpoch() * 1000000LL;
+    const qint64 nowNs = m_clock.nsecsElapsed();
     const qint64 nowMs = nowNs / 1000000LL;
     const double elapsed = qMax(0.001, double(nowNs - m_previousNs) / 1000000000.0);
 
@@ -116,10 +125,29 @@ void ProcessMonitor::sampleInternal(bool honorLinger) {
                              .arg(summary.join(QStringLiteral("; ")));
     }
 
+    emitIfChanged(bad);
+    scheduleExpiryTimer(nowMs);
+
+    m_previous = current;
+    m_previousNs = nowNs;
+}
+
+void ProcessMonitor::expireLinger() {
+    const qint64 nowMs = monotonicMs();
+    const QVector<BadProcess> bad = applyLinger({}, nowMs, true);
+    emitIfChanged(bad);
+    scheduleExpiryTimer(nowMs);
+}
+
+void ProcessMonitor::emitIfChanged(const QVector<BadProcess> &bad) {
     bool changed = bad.size() != m_lastEmitted.size();
     if (!changed) {
         for (int i = 0; i < bad.size(); ++i) {
-            if (!(bad[i].root == m_lastEmitted[i].root) || qAbs(bad[i].cpuPercent - m_lastEmitted[i].cpuPercent) >= 0.5) {
+            if (!(bad[i].root == m_lastEmitted[i].root) ||
+                bad[i].label != m_lastEmitted[i].label ||
+                bad[i].command != m_lastEmitted[i].command ||
+                bad[i].processCount != m_lastEmitted[i].processCount ||
+                qAbs(bad[i].cpuPercent - m_lastEmitted[i].cpuPercent) >= 0.5) {
                 changed = true;
                 break;
             }
@@ -130,9 +158,30 @@ void ProcessMonitor::sampleInternal(bool honorLinger) {
         m_lastEmitted = bad;
         emit badProcessesChanged(bad);
     }
+}
 
-    m_previous = current;
-    m_previousNs = nowNs;
+void ProcessMonitor::scheduleExpiryTimer(qint64 nowMs) {
+    m_expiryTimer.stop();
+
+    if (m_lingerMs <= 0 || m_recentLastSeenMs.isEmpty())
+        return;
+
+    qint64 nextDelay = std::numeric_limits<qint64>::max();
+    for (auto it = m_recentLastSeenMs.constBegin(); it != m_recentLastSeenMs.constEnd(); ++it) {
+        const qint64 delay = it.value() + m_lingerMs - nowMs;
+        if (delay <= 0) {
+            nextDelay = 0;
+            break;
+        }
+        nextDelay = qMin(nextDelay, delay);
+    }
+
+    if (nextDelay != std::numeric_limits<qint64>::max())
+        m_expiryTimer.start(int(qMin<qint64>(nextDelay, std::numeric_limits<int>::max())));
+}
+
+qint64 ProcessMonitor::monotonicMs() const {
+    return m_clock.isValid() ? m_clock.nsecsElapsed() / 1000000LL : 0;
 }
 
 QVector<BadProcess> ProcessMonitor::applyLinger(const QVector<BadProcess> &current, qint64 nowMs, bool honorLinger) {
@@ -561,8 +610,7 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
             badTreeMembers->insert(member);
 
         if (percent >= m_treeThresholdPercent) {
-//            bad.append({label, root.id, commandOf(root), percent, counted});
-            bad.append({label, root.id, label, percent, counted});
+            bad.append({label, root.id, commandOf(root), percent, counted});
         }
     }
 
