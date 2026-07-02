@@ -315,9 +315,13 @@ QString ProcessMonitor::commandOf(const ProcInfo &info) {
 QStringList ProcessMonitor::processMappingSearchPaths() const {
     QStringList paths;
 
-    const QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-    if (!configDir.isEmpty())
-        paths << QDir(configDir).filePath(QStringLiteral("process-mapping.ini"));
+    const QString userConfigRoot = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation);
+    if (!userConfigRoot.isEmpty())
+        paths << QDir(userConfigRoot).filePath(QStringLiteral("badprocess-guard/process-mapping.ini"));
+
+    const QString appConfigDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    if (!appConfigDir.isEmpty())
+        paths << QDir(appConfigDir).filePath(QStringLiteral("process-mapping.ini"));
 
     const QString appDir = QCoreApplication::applicationDirPath();
     paths << QDir(appDir).filePath(QStringLiteral("process-mapping.ini"));
@@ -457,6 +461,31 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
         return QString();
     };
 
+    auto isChromiumBase = [](const QString &base) -> bool {
+        const QString lower = base.toLower();
+        return lower == QLatin1String("chrome") ||
+               lower == QLatin1String("chrome.exe") ||
+               lower == QLatin1String("chromium") ||
+               lower == QLatin1String("chromium-browser") ||
+               lower == QLatin1String("chromium.exe") ||
+               lower == QLatin1String("msedge") ||
+               lower == QLatin1String("msedge.exe") ||
+               lower == QLatin1String("brave") ||
+               lower == QLatin1String("brave-browser") ||
+               lower == QLatin1String("brave.exe") ||
+               lower == QLatin1String("vivaldi") ||
+               lower == QLatin1String("vivaldi-bin") ||
+               lower == QLatin1String("vivaldi.exe");
+    };
+
+    auto isChromiumHelper = [](const ProcInfo &info) -> bool {
+        for (const QString &arg : info.argv) {
+            if (arg.startsWith(QLatin1String("--type=")))
+                return true;
+        }
+        return false;
+    };
+
     auto hasConfiguredRootAncestor = [&](const ProcInfo &candidate) -> bool {
         QSet<int> seen;
         int parentPid = candidate.ppid;
@@ -472,8 +501,71 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
         return false;
     };
 
+    QSet<QString> chromiumRootBasesHandled;
+    for (const RootRule &rule : m_mapping.treeRoots) {
+        const QString rootBase = rule.executableBasename;
+        if (!isChromiumBase(rootBase) || chromiumRootBasesHandled.contains(rootBase))
+            continue;
+        chromiumRootBasesHandled.insert(rootBase);
+
+        quint64 beforeTicks = 0;
+        quint64 afterTicks = 0;
+        int counted = 0;
+        QSet<ProcessIdentity> members;
+        ProcInfo representative;
+        bool haveRepresentative = false;
+
+        for (const ProcInfo &process : after) {
+            if (basenameOfArgv0(process) != rootBase)
+                continue;
+
+            const auto beforeIt = beforeById.constFind(process.id);
+            if (beforeIt == beforeById.constEnd())
+                continue;
+
+            beforeTicks += beforeIt->cpuTicks;
+            afterTicks += process.cpuTicks;
+            members.insert(process.id);
+            ++counted;
+
+            // Prefer the actual browser process over Chromium helper processes.
+            // Store a copy rather than a pointer into QHash iteration state.
+            if (!haveRepresentative || (!isChromiumHelper(process) && isChromiumHelper(representative))) {
+                representative = process;
+                haveRepresentative = true;
+            }
+        }
+
+        if (!haveRepresentative || counted == 0)
+            continue;
+
+        // Suppress generic per-process alerts for configured Chromium-family
+        // members even when the aggregate tree is just below the tree threshold.
+        // Otherwise a lingering tree alert can coexist with a newly measured
+        // hot helper, producing duplicate "Chrome" rows.
+        for (const ProcessIdentity &member : members)
+            badTreeMembers->insert(member);
+
+        const double percent = cpuPercent(beforeTicks, afterTicks, elapsedSeconds, m_cpuUnitsPerSecond);
+        if (m_debug) {
+            qInfo().noquote() << QStringLiteral("badprocess-guard: tree root %1 pid=%2 cpu=%3% counted=%4 command=%5")
+                                 .arg(rule.label)
+                                 .arg(representative.id.pid)
+                                 .arg(percent, 0, 'f', 1)
+                                 .arg(counted)
+                                 .arg(commandOf(representative));
+        }
+
+        if (percent >= m_treeThresholdPercent) {
+            bad.append({rule.label, representative.id, commandOf(representative), percent, counted});
+        }
+    }
+
     for (const ProcInfo &root : after) {
         const QString base = basenameOfArgv0(root);
+        if (chromiumRootBasesHandled.contains(base))
+            continue;
+
         const QString label = rootLabelForBase(base);
         if (label.isEmpty())
             continue;
@@ -512,9 +604,14 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
                                  .arg(commandOf(root));
         }
 
+        // Suppress generic per-process alerts for members of configured
+        // process trees even when the tree itself is below the tree threshold.
+        // Known multi-process applications should be represented by their
+        // aggregate tree entry, not by random hot children.
+        for (const ProcessIdentity &member : members)
+            badTreeMembers->insert(member);
+
         if (percent >= m_treeThresholdPercent) {
-            for (const ProcessIdentity &member : members)
-                badTreeMembers->insert(member);
             bad.append({label, root.id, commandOf(root), percent, counted});
         }
     }
