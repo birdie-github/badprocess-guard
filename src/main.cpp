@@ -68,12 +68,14 @@ int main(int argc, char **argv) {
 
     QMenu trayMenu;
     QAction *settingsAction = trayMenu.addAction(QStringLiteral("Settings"));
+    QAction *restorePositionAction = trayMenu.addAction(QStringLiteral("Restore position"));
     QAction *exitAction = trayMenu.addAction(QStringLiteral("Exit"));
 
     QSystemTrayIcon trayIcon(QIcon(QStringLiteral(":/icons/gear_metallic.svg")));
     trayIcon.setToolTip(QStringLiteral("badprocess-guard"));
     trayIcon.setContextMenu(&trayMenu);
     QObject::connect(settingsAction, &QAction::triggered, &window, &AlertWindow::showSettings);
+    QObject::connect(restorePositionAction, &QAction::triggered, &window, &AlertWindow::restorePosition);
     QObject::connect(exitAction, &QAction::triggered, &app, &QApplication::quit);
     QObject::connect(&trayIcon, &QSystemTrayIcon::activated, &window,
                      [&window](QSystemTrayIcon::ActivationReason reason) {

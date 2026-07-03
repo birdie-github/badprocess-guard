@@ -25,6 +25,7 @@ public:
 public slots:
     void setBadProcesses(const QVector<BadProcess> &processes);
     void showSettings();
+    void restorePosition();
 
 signals:
     void immediateRefreshRequested();
@@ -44,6 +45,8 @@ private:
     int contentWidth() const;
     void positionSettingsButton();
     void applyAllWorkspacesHint();
+    QPoint sanePositionOnPrimaryScreen() const;
+    QPoint clampedPosition(const QPoint &pos) const;
 
     Configuration *m_config = nullptr;
     QVBoxLayout *m_layout = nullptr;

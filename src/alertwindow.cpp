@@ -132,6 +132,15 @@ static QRect availableGeometryForWindow(QWidget *window) {
 #endif
 }
 
+static QRect availableGeometryForRestoreScreen() {
+    const QList<QScreen *> screens = QGuiApplication::screens();
+    if (!screens.isEmpty() && screens.first())
+        return screens.first()->availableGeometry();
+    if (QScreen *screen = QGuiApplication::primaryScreen())
+        return screen->availableGeometry();
+    return QRect(0, 0, 1024, 768);
+}
+
 AlertWindow::AlertWindow(Configuration *config, QWidget *parent)
     : QFrame(parent), m_config(config) {
     setWindowFlags(Qt::FramelessWindowHint | Qt::Tool | Qt::WindowStaysOnTopHint);
@@ -241,7 +250,10 @@ void AlertWindow::mouseMoveEvent(QMouseEvent *event) {
 void AlertWindow::mouseReleaseEvent(QMouseEvent *event) {
     if (m_dragging && event->button() == Qt::LeftButton) {
         m_dragging = false;
-        m_config->setWindowPosition(pos());
+        const QPoint safePos = clampedPosition(pos());
+        if (safePos != pos())
+            move(safePos);
+        m_config->setWindowPosition(safePos);
         event->accept();
         return;
     }
@@ -283,7 +295,7 @@ void AlertWindow::animateToContentHeight() {
 
     if (targetHeight > 0 && !isVisible()) {
         if (m_config->hasWindowPosition()) {
-            move(m_config->windowPosition());
+            move(clampedPosition(m_config->windowPosition()));
         } else {
             const QRect screen = availableGeometryForWindow(this);
             move(screen.right() - width() - 18, screen.top() + 18);
@@ -313,6 +325,16 @@ void AlertWindow::showSettings() {
     m_settingsDialog->show();
     m_settingsDialog->raise();
     m_settingsDialog->activateWindow();
+}
+
+void AlertWindow::restorePosition() {
+    const QPoint newPos = sanePositionOnPrimaryScreen();
+    move(newPos);
+    m_config->setWindowPosition(newPos);
+    if (isVisible()) {
+        raise();
+        applyAllWorkspacesHint();
+    }
 }
 
 void AlertWindow::confirmTerminate(const BadProcess &process) {
@@ -393,6 +415,23 @@ void AlertWindow::positionSettingsButton() {
         return;
     m_settingsButton->move(width() - m_settingsButton->width() - 5, 3);
     m_settingsButton->raise();
+}
+
+QPoint AlertWindow::sanePositionOnPrimaryScreen() const {
+    const QRect screen = availableGeometryForRestoreScreen();
+    return QPoint(screen.left() + 20, screen.top() + 20);
+}
+
+QPoint AlertWindow::clampedPosition(const QPoint &pos) const {
+    const QRect screen = availableGeometryForWindow(const_cast<AlertWindow *>(this));
+    const int margin = 20;
+    const int minX = screen.left();
+    const int minY = screen.top();
+    const int maxX = qMax(minX, screen.right() - qMin(width(), margin));
+    const int maxY = qMax(minY, screen.bottom() - qMin(height(), margin));
+
+    return QPoint(qBound(minX, pos.x(), maxX),
+                  qBound(minY, pos.y(), maxY));
 }
 
 void AlertWindow::applyAllWorkspacesHint() {
