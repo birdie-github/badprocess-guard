@@ -40,6 +40,7 @@ protected:
 private:
     void applyConfiguration();
     void animateToContentHeight();
+    void applyProcessRows(const QVector<BadProcess> &processes, int visibleRows);
     void confirmTerminate(const BadProcess &process);
     int contentHeightForRows(int rows) const;
     int contentWidth() const;
@@ -57,5 +58,6 @@ private:
     QPointer<SettingsDialog> m_settingsDialog;
     int m_animatedHeight = 0;
     bool m_dragging = false;
+    int m_dragRowCount = 0;
     QPoint m_dragOffset;
 };

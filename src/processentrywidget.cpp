@@ -32,6 +32,8 @@ ProcessEntryWidget::ProcessEntryWidget(QWidget *parent) : QWidget(parent) {
 
 void ProcessEntryWidget::setProcess(const BadProcess &process) {
     m_process = process;
+    m_stopButton->setEnabled(true);
+    m_stopButton->setText(QStringLiteral("🛑"));
     m_text->setText(QStringLiteral("<b>%1</b> · %2 · %3%")
                         .arg(process.label.toHtmlEscaped())
                         .arg(process.root.pid)
@@ -41,6 +43,15 @@ void ProcessEntryWidget::setProcess(const BadProcess &process) {
                    .arg(process.root.pid)
                    .arg(process.cpuPercent, 0, 'f', 1)
                    .arg(process.processCount));
+    updateGeometry();
+}
+
+void ProcessEntryWidget::setEmpty() {
+    m_process = BadProcess();
+    m_stopButton->setEnabled(false);
+    m_stopButton->setText(QString());
+    m_text->clear();
+    setToolTip(QString());
     updateGeometry();
 }
 

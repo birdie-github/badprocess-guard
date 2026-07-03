@@ -184,7 +184,19 @@ void AlertWindow::setAnimatedHeight(int height) {
 void AlertWindow::setBadProcesses(const QVector<BadProcess> &processes) {
     m_processes = processes;
 
-    while (m_entries.size() < processes.size()) {
+    if (m_dragging) {
+        applyProcessRows(processes, m_dragRowCount);
+        return;
+    }
+
+    applyProcessRows(processes, processes.size());
+    animateToContentHeight();
+}
+
+void AlertWindow::applyProcessRows(const QVector<BadProcess> &processes, int visibleRows) {
+    visibleRows = qMax(0, visibleRows);
+
+    while (m_entries.size() < visibleRows) {
         auto *entry = new ProcessEntryWidget(this);
         connect(entry, &ProcessEntryWidget::terminateRequested, this, &AlertWindow::confirmTerminate);
         m_layout->addWidget(entry);
@@ -192,16 +204,18 @@ void AlertWindow::setBadProcesses(const QVector<BadProcess> &processes) {
     }
 
     for (int i = 0; i < m_entries.size(); ++i) {
-        const bool visible = i < processes.size();
+        const bool visible = i < visibleRows;
         m_entries[i]->setVisible(visible);
-        if (visible) {
-            m_entries[i]->setProcess(processes[i]);
-            m_entries[i]->setDarkMode(m_config->darkMode());
-            m_entries[i]->setCustomFontEnabled(m_config->useCustomFont(), m_config->customFont());
-        }
-    }
+        if (!visible)
+            continue;
 
-    animateToContentHeight();
+        if (i < processes.size())
+            m_entries[i]->setProcess(processes[i]);
+        else
+            m_entries[i]->setEmpty();
+        m_entries[i]->setDarkMode(m_config->darkMode());
+        m_entries[i]->setCustomFontEnabled(m_config->useCustomFont(), m_config->customFont());
+    }
 }
 
 void AlertWindow::paintEvent(QPaintEvent *event) {
@@ -223,6 +237,9 @@ void AlertWindow::paintEvent(QPaintEvent *event) {
 void AlertWindow::mousePressEvent(QMouseEvent *event) {
     if (event->button() == Qt::LeftButton) {
         m_dragging = true;
+        m_dragRowCount = qMax(1, m_processes.size());
+        m_animation->stop();
+        setAnimatedHeight(height());
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         m_dragOffset = event->globalPosition().toPoint() - frameGeometry().topLeft();
 #else
@@ -250,10 +267,14 @@ void AlertWindow::mouseMoveEvent(QMouseEvent *event) {
 void AlertWindow::mouseReleaseEvent(QMouseEvent *event) {
     if (m_dragging && event->button() == Qt::LeftButton) {
         m_dragging = false;
+        m_dragRowCount = 0;
         const QPoint safePos = clampedPosition(pos());
         if (safePos != pos())
             move(safePos);
         m_config->setWindowPosition(safePos);
+        const QVector<BadProcess> processes = m_processes;
+        applyProcessRows(processes, processes.size());
+        animateToContentHeight();
         event->accept();
         return;
     }
@@ -280,7 +301,7 @@ void AlertWindow::applyConfiguration() {
     update();
     if (isVisible())
         applyAllWorkspacesHint();
-    if (!m_processes.isEmpty())
+    if (!m_dragging && !m_processes.isEmpty())
         animateToContentHeight();
 }
 

@@ -13,6 +13,7 @@ class ProcessEntryWidget : public QWidget {
 public:
     explicit ProcessEntryWidget(QWidget *parent = nullptr);
     void setProcess(const BadProcess &process);
+    void setEmpty();
     void setDarkMode(bool dark);
     void setCustomFontEnabled(bool enabled, const QFont &font);
 
