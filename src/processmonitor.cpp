@@ -368,6 +368,7 @@ QString ProcessMonitor::basenameOfArgv0(const ProcInfo &info) {
     if (!info.argv.isEmpty()) {
         QString argv0 = info.argv.first().trimmed();
 
+#ifndef Q_OS_WIN
         // /proc/<pid>/cmdline is normally NUL-separated, but be defensive:
         // if argv[0] somehow arrives as a full command line, QFileInfo() would
         // otherwise use the last slash in an option value, e.g.
@@ -381,6 +382,7 @@ QString ProcessMonitor::basenameOfArgv0(const ProcInfo &info) {
         }
         if (firstSpace > 0)
             argv0 = argv0.left(firstSpace);
+#endif
 
         return QFileInfo(argv0).fileName();
     }
