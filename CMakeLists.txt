@@ -38,6 +38,7 @@ add_executable(badprocess-guard
 target_link_libraries(badprocess-guard PRIVATE ${QT_PACKAGE}::Widgets ${QT_PACKAGE}::Svg)
 
 if(WIN32)
+    set_target_properties(badprocess-guard PROPERTIES WIN32_EXECUTABLE TRUE)
     target_compile_definitions(badprocess-guard PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
