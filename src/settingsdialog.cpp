@@ -68,6 +68,8 @@ SettingsDialog::SettingsDialog(Configuration *config, QWidget *parent)
     m_allWorkspaces = new QCheckBox(QStringLiteral("All Workspaces"), this);
     m_allWorkspaces->setToolTip(QStringLiteral("Show the alert window on all X11 workspaces."));
     const bool runningOnX11 = QGuiApplication::platformName().compare(QStringLiteral("xcb"), Qt::CaseInsensitive) == 0;
+    if (!runningOnX11)
+        m_allWorkspaces->hide();
 
     auto *form = new QFormLayout;
     form->addRow(QStringLiteral("Opacity"), opacityRow);
