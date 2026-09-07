@@ -139,10 +139,19 @@ void ProcessMonitor::sampleInternal(bool honorLinger) {
 }
 
 void ProcessMonitor::expireLinger() {
+#ifdef Q_OS_WIN
+    // A linger timeout only tells us that the last bad sample is old enough;
+    // it does not tell us that the process has recovered.  Refresh now so a
+    // continuously hot process stays visible instead of disappearing until
+    // the next periodic sample.  Linger is bypassed because its timeout has
+    // already elapsed.
+    sampleInternal(false);
+#else
     const qint64 nowMs = monotonicMs();
     const QVector<BadProcess> bad = applyLinger({}, nowMs, true);
     emitIfChanged(bad);
     scheduleExpiryTimer(nowMs);
+#endif
 }
 
 void ProcessMonitor::emitIfChanged(const QVector<BadProcess> &bad) {
