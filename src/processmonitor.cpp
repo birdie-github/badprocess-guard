@@ -51,9 +51,7 @@ ProcessMonitor::ProcessMonitor(QObject *parent) : QObject(parent) {
     connect(&m_timer, &QTimer::timeout, this, &ProcessMonitor::sample);
 
     m_expiryTimer.setSingleShot(true);
-#ifdef Q_OS_WIN
     m_expiryTimer.setTimerType(Qt::PreciseTimer);
-#endif
     connect(&m_expiryTimer, &QTimer::timeout, this, &ProcessMonitor::expireLinger);
 }
 
@@ -163,10 +161,18 @@ void ProcessMonitor::expireLinger() {
     // already elapsed.
     sampleInternal(false);
 #else
-    const qint64 nowMs = monotonicMs();
-    const QVector<BadProcess> bad = applyLinger({}, nowMs, true);
-    emitIfChanged(bad);
-    scheduleExpiryTimer(nowMs);
+    // Expiry is not evidence of recovery. Recheck CPU usage, but avoid a
+    // tiny measurement window if the periodic timer has just sampled.
+    if (!m_previous.isEmpty()) {
+        const qint64 remainingNs = 125000000LL - (m_clock.nsecsElapsed() - m_previousNs);
+        if (remainingNs > 0) {
+            m_expiryTimer.start(int((remainingNs + 999999LL) / 1000000LL));
+            return;
+        }
+    }
+    // Keep each recovered entry until its own deadline, while refreshing
+    // continuously busy entries from the new sample.
+    sampleInternal(true);
 #endif
 }
 
@@ -233,7 +239,7 @@ QVector<BadProcess> ProcessMonitor::applyLinger(const QVector<BadProcess> &curre
             continue;
 
         const qint64 lastSeen = m_recentLastSeenMs.value(id, 0);
-        if (honorLinger && m_lingerMs > 0 && nowMs - lastSeen <= m_lingerMs) {
+        if (honorLinger && m_lingerMs > 0 && nowMs - lastSeen < m_lingerMs) {
             result.append(it.value());
         } else {
             toRemove.append(id);
