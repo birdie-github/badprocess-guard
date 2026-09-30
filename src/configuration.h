@@ -41,6 +41,7 @@ public slots:
 
 signals:
     void changed();
+    void monitoringChanged();
 
 private:
     void load();

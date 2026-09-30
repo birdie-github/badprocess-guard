@@ -52,12 +52,21 @@ void Configuration::reloadFromDiskPreservingWindowPosition()
 {
     const QPoint windowPosition = m_windowPosition;
     const bool hasWindowPosition = m_hasWindowPosition;
+    const int refreshInterval = m_refreshInterval;
+    const int alertDuration = m_alertDuration;
+    const double treeThreshold = m_treeThresholdPercent;
+    const double processThreshold = m_processThresholdPercent;
 
     m_settings.sync();
     load();
     m_windowPosition = windowPosition;
     m_hasWindowPosition = hasWindowPosition;
     emit changed();
+    if (m_refreshInterval != refreshInterval || m_alertDuration != alertDuration ||
+        !qFuzzyCompare(m_treeThresholdPercent + 1.0, treeThreshold + 1.0) ||
+        !qFuzzyCompare(m_processThresholdPercent + 1.0, processThreshold + 1.0)) {
+        emit monitoringChanged();
+    }
 }
 
 void Configuration::save() {
@@ -154,6 +163,7 @@ void Configuration::setRefreshInterval(int ms) {
     m_refreshInterval = ms;
     scheduleSave();
     emit changed();
+    emit monitoringChanged();
 }
 
 void Configuration::setAlertDuration(int ms) {
@@ -163,6 +173,7 @@ void Configuration::setAlertDuration(int ms) {
     m_alertDuration = ms;
     scheduleSave();
     emit changed();
+    emit monitoringChanged();
 }
 
 void Configuration::setTreeThresholdPercent(double percent) {
@@ -172,6 +183,7 @@ void Configuration::setTreeThresholdPercent(double percent) {
     m_treeThresholdPercent = percent;
     scheduleSave();
     emit changed();
+    emit monitoringChanged();
 }
 
 void Configuration::setProcessThresholdPercent(double percent) {
@@ -181,4 +193,5 @@ void Configuration::setProcessThresholdPercent(double percent) {
     m_processThresholdPercent = percent;
     scheduleSave();
     emit changed();
+    emit monitoringChanged();
 }
