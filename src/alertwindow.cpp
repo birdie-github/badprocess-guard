@@ -175,7 +175,13 @@ AlertWindow::AlertWindow(Configuration *config, QWidget *parent)
 
 void AlertWindow::setAnimatedHeight(int height) {
     m_animatedHeight = qMax(0, height);
+#ifdef Q_OS_WIN
+    // Keep valid native geometry while the logical height is zero. The window
+    // is still hidden below when an empty alert finishes collapsing.
+    setFixedHeight(qMax(1, m_animatedHeight));
+#else
     setFixedHeight(m_animatedHeight);
+#endif
     update();
     if (m_animatedHeight <= 0 && m_processes.isEmpty())
         hide();
@@ -315,13 +321,19 @@ void AlertWindow::animateToContentHeight() {
     positionSettingsButton();
 
     if (targetHeight > 0 && !isVisible()) {
+        QPoint targetPosition;
         if (m_config->hasWindowPosition()) {
-            move(clampedPosition(m_config->windowPosition()));
+            targetPosition = clampedPosition(m_config->windowPosition());
         } else {
             const QRect screen = availableGeometryForWindow(this);
-            move(screen.right() - width() - 18, screen.top() + 18);
+            targetPosition = QPoint(screen.right() - width() - 18, screen.top() + 18);
         }
+        move(targetPosition);
         show();
+#ifdef Q_OS_WIN
+        // Apply the intended position again after native window creation.
+        move(targetPosition);
+#endif
         raise();
         // Some WMs only accept _NET_WM_STATE requests after the window has
         // become managed.  Queue it rather than setting pre-map properties.
