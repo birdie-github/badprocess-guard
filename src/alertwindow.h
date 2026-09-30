@@ -41,7 +41,7 @@ private:
     void applyConfiguration();
     void animateToContentHeight();
     void applyProcessRows(const QVector<BadProcess> &processes, int visibleRows);
-    void confirmTerminate(const BadProcess &process);
+    void confirmTerminate(BadProcess process);
     int contentHeightForRows(int rows) const;
     int contentWidth() const;
     void positionSettingsButton();

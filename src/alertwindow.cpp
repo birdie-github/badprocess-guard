@@ -370,7 +370,9 @@ void AlertWindow::restorePosition() {
     }
 }
 
-void AlertWindow::confirmTerminate(const BadProcess &process) {
+void AlertWindow::confirmTerminate(BadProcess process) {
+    // Own a copy: box.exec() keeps sampling active, so the originating row may
+    // be updated or reassigned before the user confirms the action.
     QMessageBox box(this);
     box.setWindowTitle(QStringLiteral("Close or kill application?"));
     box.setText(QStringLiteral("Close or kill %1 PID %2?").arg(process.label).arg(process.root.pid));
