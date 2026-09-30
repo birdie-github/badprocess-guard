@@ -10,6 +10,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QSlider>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
@@ -40,30 +41,30 @@ SettingsDialog::SettingsDialog(Configuration *config, QWidget *parent)
     m_customFontButton = new QPushButton(QStringLiteral("Custom Font…"), this);
 
     m_refreshInterval = new QSpinBox(this);
-    m_refreshInterval->setRange(100, 600000);
+    m_refreshInterval->setRange(250, 600000);
     m_refreshInterval->setSingleStep(100);
     m_refreshInterval->setSuffix(QStringLiteral(" ms"));
-    m_refreshInterval->setToolTip(QStringLiteral("How often process CPU usage is sampled. Lower values react faster but cost more CPU. Mininum: 100ms."));
+    m_refreshInterval->setToolTip(QStringLiteral("How often process CPU usage is sampled. Lower values react faster but cost more CPU. Minimum: 250 ms."));
 
     m_alertDuration = new QSpinBox(this);
-    m_alertDuration->setRange(250, 600000);
+    m_alertDuration->setRange(0, 600000);
     m_alertDuration->setSingleStep(100);
     m_alertDuration->setSuffix(QStringLiteral(" ms"));
-    m_alertDuration->setToolTip(QStringLiteral("How long a recovered process remains visible before disappearing. Minimum: 250ms."));
+    m_alertDuration->setToolTip(QStringLiteral("How long a recovered process remains visible before disappearing. Zero disables the hold duration."));
 
     m_treeThreshold = new QDoubleSpinBox(this);
-    m_treeThreshold->setRange(10.0, 1000000.0);
+    m_treeThreshold->setRange(0.0, 1000000.0);
     m_treeThreshold->setDecimals(1);
     m_treeThreshold->setSingleStep(1.0);
     m_treeThreshold->setSuffix(QStringLiteral(" %"));
-    m_treeThreshold->setToolTip(QStringLiteral("Aggregate CPU threshold for configured process trees. 100% means one fully busy logical CPU. Minimum: 10%."));
+    m_treeThreshold->setToolTip(QStringLiteral("Aggregate CPU threshold for configured process trees. 100% means one fully busy logical CPU. Zero includes idle trees."));
 
     m_processThreshold = new QDoubleSpinBox(this);
-    m_processThreshold->setRange(5.0, 1000000.0);
+    m_processThreshold->setRange(0.0, 1000000.0);
     m_processThreshold->setDecimals(1);
     m_processThreshold->setSingleStep(1.0);
     m_processThreshold->setSuffix(QStringLiteral(" %"));
-    m_processThreshold->setToolTip(QStringLiteral("CPU threshold for individual processes. 100% means one fully busy logical CPU. Minimum: 5%."));
+    m_processThreshold->setToolTip(QStringLiteral("CPU threshold for individual processes. 100% means one fully busy logical CPU. Zero includes idle processes."));
 
     m_allWorkspaces = new QCheckBox(QStringLiteral("All Workspaces"), this);
     m_allWorkspaces->setToolTip(QStringLiteral("Show the alert window on all X11 workspaces."));
@@ -122,6 +123,15 @@ SettingsDialog::SettingsDialog(Configuration *config, QWidget *parent)
 }
 
 void SettingsDialog::refreshFromConfig() {
+    const QSignalBlocker opacityBlocker(m_opacitySlider);
+    const QSignalBlocker darkModeBlocker(m_darkMode);
+    const QSignalBlocker customFontBlocker(m_useCustomFont);
+    const QSignalBlocker refreshBlocker(m_refreshInterval);
+    const QSignalBlocker durationBlocker(m_alertDuration);
+    const QSignalBlocker treeBlocker(m_treeThreshold);
+    const QSignalBlocker processBlocker(m_processThreshold);
+    const QSignalBlocker workspacesBlocker(m_allWorkspaces);
+
     m_opacitySlider->setValue(m_config->opacityPercent());
     m_opacityValue->setText(QStringLiteral("%1%").arg(m_config->opacityPercent()));
     m_darkMode->setChecked(m_config->darkMode());
