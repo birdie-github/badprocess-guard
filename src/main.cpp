@@ -46,6 +46,8 @@ int main(int argc, char **argv) {
     parser.process(app);
 
     Configuration config;
+    QObject::connect(&app, &QCoreApplication::aboutToQuit,
+                     &config, &Configuration::endDeferredSave);
     ProcessMonitor monitor;
     monitor.setIntervalMs(parser.isSet(intervalOpt) ? parser.value(intervalOpt).toInt() : config.refreshInterval());
     monitor.setTreeThresholdPercent(parser.isSet(thresholdOpt) ? parser.value(thresholdOpt).toDouble() : config.treeThresholdPercent());

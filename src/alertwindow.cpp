@@ -348,13 +348,11 @@ void AlertWindow::animateToContentHeight() {
 }
 
 void AlertWindow::showSettings() {
-    m_config->reloadFromDiskPreservingWindowPosition();
-
     if (!m_settingsDialog) {
+        m_config->reloadFromDiskPreservingWindowPosition();
         m_settingsDialog = new SettingsDialog(m_config, this);
         m_settingsDialog->setAttribute(Qt::WA_DeleteOnClose, true);
     }
-    m_settingsDialog->refreshFromConfig();
     m_settingsDialog->show();
     m_settingsDialog->raise();
     m_settingsDialog->activateWindow();
