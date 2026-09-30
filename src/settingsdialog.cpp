@@ -14,6 +14,8 @@
 #include <QSpinBox>
 #include <QVBoxLayout>
 
+#include <limits>
+
 SettingsDialog::SettingsDialog(Configuration *config, QWidget *parent)
     : QDialog(parent), m_config(config) {
     setWindowTitle(QStringLiteral("badprocess-guard settings"));
@@ -41,13 +43,13 @@ SettingsDialog::SettingsDialog(Configuration *config, QWidget *parent)
     m_customFontButton = new QPushButton(QStringLiteral("Custom Font…"), this);
 
     m_refreshInterval = new QSpinBox(this);
-    m_refreshInterval->setRange(250, 600000);
+    m_refreshInterval->setRange(250, std::numeric_limits<int>::max());
     m_refreshInterval->setSingleStep(100);
     m_refreshInterval->setSuffix(QStringLiteral(" ms"));
     m_refreshInterval->setToolTip(QStringLiteral("How often process CPU usage is sampled. Lower values react faster but cost more CPU. Minimum: 250 ms."));
 
     m_alertDuration = new QSpinBox(this);
-    m_alertDuration->setRange(0, 600000);
+    m_alertDuration->setRange(0, std::numeric_limits<int>::max());
     m_alertDuration->setSingleStep(100);
     m_alertDuration->setSuffix(QStringLiteral(" ms"));
     m_alertDuration->setToolTip(QStringLiteral("How long a recovered process remains visible before disappearing. Zero disables the hold duration."));
