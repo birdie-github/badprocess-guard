@@ -2,6 +2,7 @@
 
 #include "processmonitor.h"
 
+#include <QColor>
 #include <QToolButton>
 #include <QWidget>
 
@@ -15,6 +16,8 @@ public:
     void setProcess(const BadProcess &process);
     void setEmpty();
     void setDarkMode(bool dark);
+    void setNameColor(const QColor &color);
+    bool hasActiveProcess() const { return m_process.root.pid > 0 && m_process.active; }
     void setCustomFontEnabled(bool enabled, const QFont &font);
 
 signals:
@@ -23,5 +26,6 @@ signals:
 private:
     BadProcess m_process;
     QToolButton *m_stopButton = nullptr;
+    QLabel *m_name = nullptr;
     QLabel *m_text = nullptr;
 };

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QFont>
 #include <QObject>
 #include <QPoint>
@@ -20,6 +21,9 @@ public:
     bool allWorkspaces() const { return m_allWorkspaces; }
     int refreshInterval() const { return m_refreshInterval; }
     int alertDuration() const { return m_alertDuration; }
+    bool animateNames() const { return m_animateNames; }
+    QColor animationColor() const { return m_animationColor; }
+    int animationDuration() const { return m_animationDuration; }
     double treeThresholdPercent() const { return m_treeThresholdPercent; }
     double processThresholdPercent() const { return m_processThresholdPercent; }
     void reloadFromDiskPreservingWindowPosition();
@@ -36,6 +40,9 @@ public slots:
     void setAllWorkspaces(bool enabled);
     void setRefreshInterval(int ms);
     void setAlertDuration(int ms);
+    void setAnimateNames(bool enabled);
+    void setAnimationColor(const QColor &color);
+    void setAnimationDuration(int ms);
     void setTreeThresholdPercent(double percent);
     void setProcessThresholdPercent(double percent);
 
@@ -59,6 +66,9 @@ private:
     bool m_allWorkspaces = false;
     int m_refreshInterval = 5000;
     int m_alertDuration = 3000;
+    bool m_animateNames = true;
+    QColor m_animationColor = QColor(QStringLiteral("#ff0000"));
+    int m_animationDuration = 1000;
     double m_treeThresholdPercent = 50.0;
     double m_processThresholdPercent = 50.0;
     bool m_deferSaves = false;

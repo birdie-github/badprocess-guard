@@ -23,6 +23,9 @@ private:
     QSlider *m_opacitySlider = nullptr;
     QLabel *m_opacityValue = nullptr;
     QCheckBox *m_darkMode = nullptr;
+    QCheckBox *m_animateNames = nullptr;
+    QPushButton *m_animationColor = nullptr;
+    QSpinBox *m_animationDuration = nullptr;
     QCheckBox *m_useCustomFont = nullptr;
     QPushButton *m_customFontButton = nullptr;
     QSpinBox *m_refreshInterval = nullptr;

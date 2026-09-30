@@ -101,6 +101,7 @@ Settings include:
 * process-tree CPU threshold;
 * overlay opacity;
 * dark mode;
+* process-name color animation, target color, and animation duration;
 * custom font;
 * Linux/X11 all-workspaces behavior.
 
@@ -116,13 +117,21 @@ RefreshInterval=5000
 AlertDuration=3000
 Opacity=50
 DarkMode=true
+AnimateNames=true
+AnimationColor=#ff0000
+AnimationDuration=1000
 Font=
 AllWorkspaces=false
 TreeThreshold=50
 ProcessThreshold=50
 ```
 
-`RefreshInterval` and `AlertDuration` are expressed in milliseconds.
+`RefreshInterval`, `AlertDuration`, and `AnimationDuration` are expressed in milliseconds.
+
+Active process names pulse together between the theme text color and `AnimationColor`.
+`AnimationDuration` is the time for each direction (100–999000 ms); the default full cycle is two seconds.
+Updates use one fixed 100 ms timer, which stops when no displayed process is active or `AnimateNames` is disabled.
+Recovered processes return to their normal text color during the alert hold duration.
 
 `AllWorkspaces` is Linux/X11-only. On X11 it makes the alert visible on all virtual desktops. It is ignored on Windows and Wayland.
 

@@ -16,6 +16,12 @@ void Configuration::load() {
 
     m_opacityPercent = qBound(10, m_settings.value(QStringLiteral("Opacity"), 50).toInt(), 100);
     m_darkMode = m_settings.value(QStringLiteral("DarkMode"), true).toBool();
+    m_animateNames = m_settings.value(QStringLiteral("AnimateNames"), true).toBool();
+    m_animationColor = QColor(m_settings.value(QStringLiteral("AnimationColor"), QStringLiteral("#ff0000")).toString());
+    if (!m_animationColor.isValid())
+        m_animationColor = QColor(QStringLiteral("#ff0000"));
+    m_animationColor.setAlpha(255);
+    m_animationDuration = qBound(100, m_settings.value(QStringLiteral("AnimationDuration"), 1000).toInt(), 999000);
     m_allWorkspaces = m_settings.value(QStringLiteral("AllWorkspaces"), false).toBool();
     m_refreshInterval = qMax(250, m_settings.value(QStringLiteral("RefreshInterval"), 5000).toInt());
     m_alertDuration = qMax(0, m_settings.value(QStringLiteral("AlertDuration"), 3000).toInt());
@@ -73,6 +79,9 @@ void Configuration::save() {
     m_settings.beginGroup(QStringLiteral("Settings"));
     m_settings.setValue(QStringLiteral("Opacity"), m_opacityPercent);
     m_settings.setValue(QStringLiteral("DarkMode"), m_darkMode);
+    m_settings.setValue(QStringLiteral("AnimateNames"), m_animateNames);
+    m_settings.setValue(QStringLiteral("AnimationColor"), m_animationColor.name());
+    m_settings.setValue(QStringLiteral("AnimationDuration"), m_animationDuration);
     m_settings.setValue(QStringLiteral("Font"), m_useCustomFont ? m_customFont.toString() : QString());
     m_settings.setValue(QStringLiteral("AllWorkspaces"), m_allWorkspaces);
     m_settings.setValue(QStringLiteral("RefreshInterval"), m_refreshInterval);
@@ -194,4 +203,32 @@ void Configuration::setProcessThresholdPercent(double percent) {
     scheduleSave();
     emit changed();
     emit monitoringChanged();
+}
+
+void Configuration::setAnimateNames(bool enabled) {
+    if (m_animateNames == enabled)
+        return;
+    m_animateNames = enabled;
+    scheduleSave();
+    emit changed();
+}
+
+void Configuration::setAnimationColor(const QColor &color) {
+    if (!color.isValid())
+        return;
+    const QColor opaque(color.red(), color.green(), color.blue());
+    if (m_animationColor == opaque)
+        return;
+    m_animationColor = opaque;
+    scheduleSave();
+    emit changed();
+}
+
+void Configuration::setAnimationDuration(int ms) {
+    ms = qBound(100, ms, 999000);
+    if (m_animationDuration == ms)
+        return;
+    m_animationDuration = ms;
+    scheduleSave();
+    emit changed();
 }

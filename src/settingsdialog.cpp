@@ -4,6 +4,7 @@
 #include <QApplication>
 #include <QGuiApplication>
 #include <QDoubleSpinBox>
+#include <QColorDialog>
 #include <QFontDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -37,6 +38,14 @@ SettingsDialog::SettingsDialog(Configuration *config, QWidget *parent)
     opacityLayout->setContentsMargins(0, 0, 0, 0);
     opacityLayout->addWidget(m_opacitySlider, 1);
     opacityLayout->addWidget(m_opacityValue);
+
+    m_animateNames = new QCheckBox(QStringLiteral("Animate process names"), this);
+    m_animationColor = new QPushButton(this);
+    m_animationDuration = new QSpinBox(this);
+    m_animationDuration->setRange(100, 999000);
+    m_animationDuration->setSingleStep(100);
+    m_animationDuration->setSuffix(QStringLiteral(" ms"));
+    m_animationDuration->setToolTip(QStringLiteral("Time taken to transition from the normal text color to the selected color. The return transition takes the same amount of time."));
 
     m_darkMode = new QCheckBox(QStringLiteral("Dark mode"), this);
     m_useCustomFont = new QCheckBox(QStringLiteral("Use custom font"), this);
@@ -80,6 +89,9 @@ SettingsDialog::SettingsDialog(Configuration *config, QWidget *parent)
     form->addRow(QStringLiteral("Alert duration"), m_alertDuration);
     form->addRow(QStringLiteral("Tree threshold"), m_treeThreshold);
     form->addRow(QStringLiteral("Process threshold"), m_processThreshold);
+    form->addRow(QString(), m_animateNames);
+    form->addRow(QStringLiteral("Animation color"), m_animationColor);
+    form->addRow(QStringLiteral("Animation duration"), m_animationDuration);
     form->addRow(QString(), m_darkMode);
     form->addRow(QString(), m_useCustomFont);
     form->addRow(QString(), m_customFontButton);
@@ -100,6 +112,20 @@ SettingsDialog::SettingsDialog(Configuration *config, QWidget *parent)
     connect(m_opacitySlider, &QSlider::valueChanged, this, [this](int value) {
         m_opacityValue->setText(QStringLiteral("%1%").arg(value));
         m_config->setOpacityPercent(value);
+    });
+    connect(m_animateNames, &QCheckBox::toggled, this, [this](bool enabled) {
+        m_animationColor->setEnabled(enabled);
+        m_animationDuration->setEnabled(enabled);
+        m_config->setAnimateNames(enabled);
+    });
+    connect(m_animationDuration, QOverload<int>::of(&QSpinBox::valueChanged),
+            m_config, &Configuration::setAnimationDuration);
+    connect(m_animationColor, &QPushButton::clicked, this, [this] {
+        const QColor color = QColorDialog::getColor(m_config->animationColor(), this, QStringLiteral("Select animation color"));
+        if (color.isValid()) {
+            m_config->setAnimationColor(color);
+            m_animationColor->setText(color.name());
+        }
     });
     connect(m_darkMode, &QCheckBox::toggled, m_config, &Configuration::setDarkMode);
     connect(m_refreshInterval, QOverload<int>::of(&QSpinBox::valueChanged),
@@ -127,6 +153,8 @@ SettingsDialog::SettingsDialog(Configuration *config, QWidget *parent)
 void SettingsDialog::refreshFromConfig() {
     const QSignalBlocker opacityBlocker(m_opacitySlider);
     const QSignalBlocker darkModeBlocker(m_darkMode);
+    const QSignalBlocker animateBlocker(m_animateNames);
+    const QSignalBlocker animationDurationBlocker(m_animationDuration);
     const QSignalBlocker customFontBlocker(m_useCustomFont);
     const QSignalBlocker refreshBlocker(m_refreshInterval);
     const QSignalBlocker durationBlocker(m_alertDuration);
@@ -137,6 +165,11 @@ void SettingsDialog::refreshFromConfig() {
     m_opacitySlider->setValue(m_config->opacityPercent());
     m_opacityValue->setText(QStringLiteral("%1%").arg(m_config->opacityPercent()));
     m_darkMode->setChecked(m_config->darkMode());
+    m_animateNames->setChecked(m_config->animateNames());
+    m_animationColor->setText(m_config->animationColor().name());
+    m_animationColor->setEnabled(m_config->animateNames());
+    m_animationDuration->setValue(m_config->animationDuration());
+    m_animationDuration->setEnabled(m_config->animateNames());
     m_useCustomFont->setChecked(m_config->useCustomFont());
     m_customFontButton->setEnabled(m_config->useCustomFont());
     m_refreshInterval->setValue(m_config->refreshInterval());

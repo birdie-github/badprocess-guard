@@ -5,6 +5,8 @@
 #include "processmonitor.h"
 #include "settingsdialog.h"
 
+#include <QElapsedTimer>
+#include <QTimer>
 #include <QFrame>
 #include <QPointer>
 #include <QPropertyAnimation>
@@ -39,6 +41,7 @@ protected:
 
 private:
     void applyConfiguration();
+    void updateNameAnimation();
     void animateToContentHeight();
     void applyProcessRows(const QVector<BadProcess> &processes, int visibleRows);
     void confirmTerminate(BadProcess process);
@@ -55,6 +58,8 @@ private:
     QVector<ProcessEntryWidget *> m_entries;
     QVector<BadProcess> m_processes;
     QPropertyAnimation *m_animation = nullptr;
+    QTimer m_nameAnimationTimer;
+    QElapsedTimer m_nameAnimationClock;
     QPointer<SettingsDialog> m_settingsDialog;
     int m_animatedHeight = 0;
     bool m_dragging = false;

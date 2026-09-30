@@ -202,6 +202,10 @@ AlertWindow::AlertWindow(Configuration *config, QWidget *parent)
     m_animation->setDuration(333);
     m_animation->setEasingCurve(QEasingCurve::OutCubic);
 
+    m_nameAnimationTimer.setInterval(100);
+    m_nameAnimationTimer.setTimerType(Qt::PreciseTimer);
+    connect(&m_nameAnimationTimer, &QTimer::timeout, this, &AlertWindow::updateNameAnimation);
+
     connect(m_settingsButton, &QToolButton::clicked, this, &AlertWindow::showSettings);
     connect(m_config, &Configuration::changed, this, &AlertWindow::applyConfiguration);
     applyConfiguration();
@@ -256,6 +260,7 @@ void AlertWindow::applyProcessRows(const QVector<BadProcess> &processes, int vis
         else
             m_entries[i]->setEmpty();
     }
+    updateNameAnimation();
 }
 
 void AlertWindow::paintEvent(QPaintEvent *event) {
@@ -338,6 +343,7 @@ void AlertWindow::applyConfiguration() {
         entry->setDarkMode(m_config->darkMode());
         entry->setCustomFontEnabled(m_config->useCustomFont(), m_config->customFont());
     }
+    updateNameAnimation();
     update();
     if (isVisible())
         applyAllWorkspacesHint();
@@ -535,4 +541,39 @@ void AlertWindow::applyAllWorkspacesHint() {
 void AlertWindow::resizeEvent(QResizeEvent *event) {
     QFrame::resizeEvent(event);
     positionSettingsButton();
+}
+
+void AlertWindow::updateNameAnimation() {
+    bool animate = false;
+    if (m_config->animateNames()) {
+        for (ProcessEntryWidget *entry : m_entries) {
+            if (!entry->isHidden() && entry->hasActiveProcess()) {
+                animate = true;
+                break;
+            }
+        }
+    }
+    if (animate && !m_nameAnimationTimer.isActive()) {
+        m_nameAnimationClock.start();
+        m_nameAnimationTimer.start();
+    } else if (!animate) {
+        m_nameAnimationTimer.stop();
+        m_nameAnimationClock.invalidate();
+    }
+
+    const QColor normal(m_config->darkMode() ? QStringLiteral("#f5f5f5") : QStringLiteral("#111111"));
+    QColor pulsing = normal;
+    if (animate) {
+        const qint64 duration = m_config->animationDuration();
+        const qint64 phase = m_nameAnimationClock.elapsed() % (2 * duration);
+        const double progress = double(phase <= duration ? phase : 2 * duration - phase) / duration;
+        const QColor target = m_config->animationColor();
+        pulsing = QColor(qRound(normal.red() + (target.red() - normal.red()) * progress),
+                         qRound(normal.green() + (target.green() - normal.green()) * progress),
+                         qRound(normal.blue() + (target.blue() - normal.blue()) * progress));
+    }
+    for (ProcessEntryWidget *entry : m_entries) {
+        if (!entry->isHidden())
+            entry->setNameColor(animate && entry->hasActiveProcess() ? pulsing : normal);
+    }
 }

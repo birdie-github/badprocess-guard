@@ -184,6 +184,7 @@ void ProcessMonitor::emitIfChanged(const QVector<BadProcess> &bad) {
                 bad[i].label != m_lastEmitted[i].label ||
                 bad[i].command != m_lastEmitted[i].command ||
                 bad[i].processCount != m_lastEmitted[i].processCount ||
+                bad[i].active != m_lastEmitted[i].active ||
                 qAbs(bad[i].cpuPercent - m_lastEmitted[i].cpuPercent) >= 0.5) {
                 changed = true;
                 break;
@@ -240,7 +241,9 @@ QVector<BadProcess> ProcessMonitor::applyLinger(const QVector<BadProcess> &curre
 
         const qint64 lastSeen = m_recentLastSeenMs.value(id, 0);
         if (honorLinger && m_lingerMs > 0 && nowMs - lastSeen < m_lingerMs) {
-            result.append(it.value());
+            BadProcess lingering = it.value();
+            lingering.active = false;
+            result.append(lingering);
         } else {
             toRemove.append(id);
         }

@@ -28,6 +28,7 @@ struct BadProcess {
     QString command;
     double cpuPercent = 0.0;
     int processCount = 0;
+    bool active = true;
 };
 
 class ProcessMonitor : public QObject {

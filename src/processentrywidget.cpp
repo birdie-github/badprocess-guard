@@ -2,6 +2,7 @@
 
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPalette>
 #include <QtGlobal>
 
 ProcessEntryWidget::ProcessEntryWidget(QWidget *parent) : QWidget(parent) {
@@ -14,6 +15,10 @@ ProcessEntryWidget::ProcessEntryWidget(QWidget *parent) : QWidget(parent) {
     m_stopButton->setCursor(Qt::PointingHandCursor);
     m_stopButton->setFixedSize(20, 20);
 
+    m_name = new QLabel(this);
+    m_name->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
+    m_name->setTextFormat(Qt::RichText);
+    m_name->setTextInteractionFlags(Qt::NoTextInteraction);
     m_text = new QLabel(this);
     m_text->setTextInteractionFlags(Qt::NoTextInteraction);
     m_text->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
@@ -23,6 +28,7 @@ ProcessEntryWidget::ProcessEntryWidget(QWidget *parent) : QWidget(parent) {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(4);
     layout->addWidget(m_stopButton);
+    layout->addWidget(m_name);
     layout->addWidget(m_text);
 
     connect(m_stopButton, &QToolButton::clicked, this, [this] {
@@ -34,8 +40,8 @@ void ProcessEntryWidget::setProcess(const BadProcess &process) {
     m_process = process;
     m_stopButton->setEnabled(true);
     m_stopButton->setText(QStringLiteral("🛑"));
-    m_text->setText(QStringLiteral("<b>%1</b> · %2 · %3%")
-                        .arg(process.label.toHtmlEscaped())
+    m_name->setText(QStringLiteral("<b>%1</b>").arg(process.label.toHtmlEscaped()));
+    m_text->setText(QStringLiteral("· %1 · %2%")
                         .arg(process.root.pid)
                         .arg(qRound(process.cpuPercent)));
     setToolTip(QStringLiteral("%1\nPID: %2\nCPU: %3%\nProcesses: %4")
@@ -50,6 +56,7 @@ void ProcessEntryWidget::setEmpty() {
     m_process = BadProcess();
     m_stopButton->setEnabled(false);
     m_stopButton->setText(QString());
+    m_name->clear();
     m_text->clear();
     setToolTip(QString());
     updateGeometry();
@@ -57,17 +64,28 @@ void ProcessEntryWidget::setEmpty() {
 
 void ProcessEntryWidget::setDarkMode(bool dark) {
     const QString color = dark ? QStringLiteral("#f5f5f5") : QStringLiteral("#111111");
+    setNameColor(QColor(color));
     m_text->setStyleSheet(QStringLiteral("QLabel { color: %1; }").arg(color));
     m_stopButton->setStyleSheet(QStringLiteral("QToolButton { color: %1; border: 0; background: transparent; }").arg(color));
 }
 
 void ProcessEntryWidget::setCustomFontEnabled(bool enabled, const QFont &font) {
     if (enabled) {
+        m_name->setFont(font);
         m_text->setFont(font);
         m_stopButton->setFont(font);
     } else {
+        m_name->setFont(QFont());
         m_text->setFont(QFont());
         m_stopButton->setFont(QFont());
     }
     updateGeometry();
+}
+
+void ProcessEntryWidget::setNameColor(const QColor &color) {
+    QPalette palette = m_name->palette();
+    if (palette.color(QPalette::WindowText) == color)
+        return;
+    palette.setColor(QPalette::WindowText, color);
+    m_name->setPalette(palette);
 }
