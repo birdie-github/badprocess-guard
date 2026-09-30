@@ -133,9 +133,6 @@ static QRect availableGeometryForWindow(QWidget *window) {
 }
 
 static QRect availableGeometryForRestoreScreen() {
-    const QList<QScreen *> screens = QGuiApplication::screens();
-    if (!screens.isEmpty() && screens.first())
-        return screens.first()->availableGeometry();
     if (QScreen *screen = QGuiApplication::primaryScreen())
         return screen->availableGeometry();
     return QRect(0, 0, 1024, 768);
@@ -456,7 +453,13 @@ QPoint AlertWindow::sanePositionOnPrimaryScreen() const {
 }
 
 QPoint AlertWindow::clampedPosition(const QPoint &pos) const {
-    const QRect screen = availableGeometryForWindow(const_cast<AlertWindow *>(this));
+    QRect screen = availableGeometryForRestoreScreen();
+    for (QScreen *candidate : QGuiApplication::screens()) {
+        if (candidate->geometry().contains(pos)) {
+            screen = candidate->availableGeometry();
+            break;
+        }
+    }
     const int margin = 20;
     const int minX = screen.left();
     const int minY = screen.top();
