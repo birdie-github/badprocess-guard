@@ -378,6 +378,16 @@ bool ProcessMonitor::readProc(int pid, ProcInfo *info) {
         }
     }
 
+    if (!argv.isEmpty()) {
+        for (const QChar character : argv.first()) {
+            if (character.isSpace()) {
+                const QString executable = QFileInfo(QStringLiteral("/proc/%1/exe").arg(pid)).symLinkTarget();
+                info->executableName = QFileInfo(executable).fileName();
+                break;
+            }
+        }
+    }
+
     info->id = {pid, start};
     info->ppid = ppid;
     info->cpuTicks = utime + stime;
@@ -389,7 +399,7 @@ bool ProcessMonitor::readProc(int pid, ProcInfo *info) {
 
 QString ProcessMonitor::basenameOfArgv0(const ProcInfo &info) {
     if (!info.argv.isEmpty()) {
-        QString argv0 = info.argv.first().trimmed();
+        const QString &argv0 = info.argv.first();
 
         QString windowsPath = argv0;
         if (windowsPath.size() >= 2 && windowsPath.startsWith(QLatin1Char('"')) &&
@@ -408,21 +418,12 @@ QString ProcessMonitor::basenameOfArgv0(const ProcInfo &info) {
             return windowsPath.mid(separator + 1);
         }
 
-#ifndef Q_OS_WIN
-        // /proc/<pid>/cmdline is normally NUL-separated, but be defensive:
-        // if argv[0] somehow arrives as a full command line, QFileInfo() would
-        // otherwise use the last slash in an option value, e.g.
-        // --disk-cache-dir=/tmp/.chrome-cache, and display ".chrome-cache ...".
-        int firstSpace = -1;
-        for (int i = 0; i < argv0.size(); ++i) {
-            if (argv0.at(i).isSpace()) {
-                firstSpace = i;
-                break;
-            }
-        }
-        if (firstSpace > 0)
-            argv0 = argv0.left(firstSpace);
-#endif
+        // argv[0] may contain a real path with spaces or a rewritten process
+        // title. Prefer the kernel's executable name when available; never
+        // guess an argument boundary from whitespace. Wine paths above keep
+        // their Windows executable name instead of the Wine loader's name.
+        if (!info.executableName.isEmpty())
+            return info.executableName;
 
         return QFileInfo(argv0).fileName();
     }

@@ -66,6 +66,7 @@ private:
         qint64 sampledNs = 0;
 #endif
         QString comm;
+        QString executableName;
         QStringList argv;
     };
 
