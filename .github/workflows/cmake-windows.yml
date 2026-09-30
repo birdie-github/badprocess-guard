@@ -37,6 +37,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item build\Release\badprocess-guard.exe dist\
+          Copy-Item build\process-mapping.ini dist\
           windeployqt `
             --release dist\badprocess-guard.exe `
             --no-translations `
