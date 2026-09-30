@@ -51,6 +51,9 @@ ProcessMonitor::ProcessMonitor(QObject *parent) : QObject(parent) {
     connect(&m_timer, &QTimer::timeout, this, &ProcessMonitor::sample);
 
     m_expiryTimer.setSingleShot(true);
+#ifdef Q_OS_WIN
+    m_expiryTimer.setTimerType(Qt::PreciseTimer);
+#endif
     connect(&m_expiryTimer, &QTimer::timeout, this, &ProcessMonitor::expireLinger);
 }
 
@@ -105,6 +108,19 @@ void ProcessMonitor::sample() {
 void ProcessMonitor::sampleInternal(bool honorLinger) {
     if (!m_clock.isValid())
         m_clock.start();
+
+#ifdef Q_OS_WIN
+    // Periodic, expiry and explicit refreshes can arrive together. Avoid
+    // measuring Windows CPU accounting over a tiny interval or scanning twice
+    // in succession. The expiry timer also delivers any deferred refresh.
+    if (!m_previous.isEmpty()) {
+        const qint64 remainingNs = 125000000LL - (m_clock.nsecsElapsed() - m_previousNs);
+        if (remainingNs > 0) {
+            m_expiryTimer.start(int((remainingNs + 999999LL) / 1000000LL));
+            return;
+        }
+    }
+#endif
 
     const Snapshot current = readSnapshot();
     const qint64 nowNs = m_clock.nsecsElapsed();
@@ -270,6 +286,7 @@ ProcessMonitor::Snapshot ProcessMonitor::readSnapshot() const {
                 CloseHandle(process);
                 continue;
             }
+            info.sampledNs = m_clock.nsecsElapsed();
 
             ULARGE_INTEGER ct, kt, ut;
             ct.LowPart = creationTime.dwLowDateTime;
@@ -502,6 +519,15 @@ QSet<int> ProcessMonitor::collectTreePids(int rootPid, const QHash<int, QVector<
     return seen;
 }
 
+double ProcessMonitor::processCpuPercent(const ProcInfo &before, const ProcInfo &after, double elapsedSeconds) const {
+#ifdef Q_OS_WIN
+    // Each process is read at a different point in the scan. Its CPU delta
+    // must use the interval between its own readings, not the scan end times.
+    elapsedSeconds = double(after.sampledNs - before.sampledNs) / 1000000000.0;
+#endif
+    return cpuPercent(before.cpuTicks, after.cpuTicks, elapsedSeconds, m_cpuUnitsPerSecond);
+}
+
 QVector<BadProcess> ProcessMonitor::measureBadProcesses(const Snapshot &before, const Snapshot &after, double elapsedSeconds) {
     QSet<ProcessIdentity> badTreeMembers;
     QSet<ProcessIdentity> treeRootsSeen;
@@ -585,8 +611,7 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
             continue;
 
         const QSet<int> pids = collectTreePids(root.id.pid, children);
-        quint64 beforeTicks = 0;
-        quint64 afterTicks = 0;
+        double percent = 0.0;
         int counted = 0;
         QSet<ProcessIdentity> members;
 
@@ -597,8 +622,7 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
             const auto beforeIt = beforeById.constFind(afterIt->id);
             if (beforeIt == beforeById.constEnd())
                 continue;
-            beforeTicks += beforeIt->cpuTicks;
-            afterTicks += afterIt->cpuTicks;
+            percent += processCpuPercent(*beforeIt, *afterIt, elapsedSeconds);
             members.insert(afterIt->id);
             ++counted;
         }
@@ -609,7 +633,6 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
         if (treeRootsSeen)
             treeRootsSeen->insert(root.id);
 
-        const double percent = cpuPercent(beforeTicks, afterTicks, elapsedSeconds, m_cpuUnitsPerSecond);
         if (m_debug) {
             qInfo().noquote() << QStringLiteral("badprocess-guard: tree root %1 pid=%2 cpu=%3% counted=%4 command=%5")
                                  .arg(label)
@@ -648,7 +671,7 @@ QVector<BadProcess> ProcessMonitor::measureLeaves(const Snapshot &before, const 
         if (beforeIt == beforeById.constEnd())
             continue;
 
-        const double percent = cpuPercent(beforeIt->cpuTicks, process.cpuTicks, elapsedSeconds, m_cpuUnitsPerSecond);
+        const double percent = processCpuPercent(*beforeIt, process, elapsedSeconds);
         if (percent < m_processThresholdPercent)
             continue;
 
