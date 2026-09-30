@@ -202,6 +202,8 @@ BadProcess Guard monitors running processes using native Win32 APIs and can clos
 
 BadProcess Guard obtains process and CPU accounting information from `/proc`.
 
+Close/Kill actions require Linux 5.3 or later with `pidfd_open` and `pidfd_send_signal` available, plus build headers exposing those system calls. If unavailable or blocked, the action reports an error; monitoring still works.
+
 X11 additionally supports displaying the alert across all virtual workspaces.
 
 ## Similar tools

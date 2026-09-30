@@ -25,8 +25,11 @@
 
 #ifdef Q_OS_WIN
 #include <windows.h>
-#else
+#elif defined(Q_OS_LINUX)
+#include <cerrno>
 #include <signal.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #endif
 
 
@@ -63,30 +66,8 @@ static bool requestCloseWindows(int pid) {
 }
 #endif
 
+#if defined(Q_OS_LINUX) && defined(SYS_pidfd_open) && defined(SYS_pidfd_send_signal)
 static bool currentProcessIdentity(int pid, ProcessIdentity *identity) {
-    if (!identity || pid <= 0)
-        return false;
-
-#ifdef Q_OS_WIN
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, DWORD(pid));
-    if (!process)
-        process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, DWORD(pid));
-    if (!process)
-        return false;
-
-    FILETIME creationTime, exitTime, kernelTime, userTime;
-    const bool ok = GetProcessTimes(process, &creationTime, &exitTime, &kernelTime, &userTime) != 0;
-    CloseHandle(process);
-    if (!ok)
-        return false;
-
-    ULARGE_INTEGER ct;
-    ct.LowPart = creationTime.dwLowDateTime;
-    ct.HighPart = creationTime.dwHighDateTime;
-    identity->pid = pid;
-    identity->startTime = ct.QuadPart;
-    return true;
-#else
     QFile statFile(QStringLiteral("/proc/%1/stat").arg(pid));
     if (!statFile.open(QIODevice::ReadOnly | QIODevice::Text))
         return false;
@@ -110,12 +91,68 @@ static bool currentProcessIdentity(int pid, ProcessIdentity *identity) {
     identity->pid = pid;
     identity->startTime = startTime;
     return true;
-#endif
 }
+#endif
 
-static bool isSameLiveProcess(const ProcessIdentity &expected) {
+static QString actOnProcess(const ProcessIdentity &expected, bool force) {
+    if (expected.pid <= 0)
+        return QStringLiteral("The selected process identity is invalid.");
+
+#ifdef Q_OS_WIN
+    const DWORD actionAccess = force ? PROCESS_TERMINATE : 0;
+    HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | actionAccess, FALSE, DWORD(expected.pid));
+    if (!handle)
+        handle = OpenProcess(PROCESS_QUERY_INFORMATION | actionAccess, FALSE, DWORD(expected.pid));
+    if (!handle) {
+        const DWORD errorCode = GetLastError();
+        return QStringLiteral("Cannot open PID %1 (Windows error %2).").arg(expected.pid).arg(errorCode);
+    }
+
+    QString error;
+    FILETIME creationTime, exitTime, kernelTime, userTime;
+    if (!GetProcessTimes(handle, &creationTime, &exitTime, &kernelTime, &userTime)) {
+        error = QStringLiteral("Cannot verify the selected process (Windows error %1).").arg(GetLastError());
+    } else {
+        ULARGE_INTEGER creation;
+        creation.LowPart = creationTime.dwLowDateTime;
+        creation.HighPart = creationTime.dwHighDateTime;
+        if (creation.QuadPart != expected.startTime) {
+            error = QStringLiteral("The PID now belongs to a different process. No action was taken.");
+        } else if (force) {
+            if (!TerminateProcess(handle, 1))
+                error = QStringLiteral("Cannot terminate the selected process (Windows error %1).").arg(GetLastError());
+        } else if (!requestCloseWindows(expected.pid)) {
+            error = QStringLiteral("No close request could be sent to the selected process's top-level windows.");
+        }
+    }
+    // Keep the process object alive through validation and the action so its
+    // PID cannot be reused, including while enumerating windows for Close.
+    CloseHandle(handle);
+    return error;
+#elif defined(Q_OS_LINUX) && defined(SYS_pidfd_open) && defined(SYS_pidfd_send_signal)
+    const int fd = int(::syscall(SYS_pidfd_open, expected.pid, 0U));
+    if (fd < 0) {
+        const int errorCode = errno;
+        return QStringLiteral("Cannot access PID %1 for safe signalling: %2.")
+            .arg(expected.pid).arg(QString::fromLocal8Bit(std::strerror(errorCode)));
+    }
+
+    QString error;
     ProcessIdentity current;
-    return currentProcessIdentity(expected.pid, &current) && current == expected;
+    // Open the pidfd before checking /proc. If the process exits after this
+    // check, signalling the pidfd fails instead of acting on a reused PID.
+    if (!currentProcessIdentity(expected.pid, &current) || !(current == expected)) {
+        error = QStringLiteral("The selected process has exited or its identity could not be verified. No action was taken.");
+    } else if (::syscall(SYS_pidfd_send_signal, fd, force ? SIGKILL : SIGTERM, nullptr, 0U) < 0) {
+        error = QStringLiteral("Cannot signal the selected process: %1.")
+            .arg(QString::fromLocal8Bit(std::strerror(errno)));
+    }
+    ::close(fd);
+    return error;
+#else
+    Q_UNUSED(force)
+    return QStringLiteral("This build does not support safe process signalling on this platform.");
+#endif
 }
 
 static QRect availableGeometryForWindow(QWidget *window) {
@@ -403,40 +440,18 @@ void AlertWindow::confirmTerminate(BadProcess process) {
 
     const bool wantsClose = (box.clickedButton() == close);
     const bool wantsKill = (box.clickedButton() == kill);
-    bool acted = false;
+    if (!wantsClose && !wantsKill)
+        return;
 
-    if (wantsClose || wantsKill) {
-        if (!isSameLiveProcess(process.root)) {
-            QMessageBox::warning(this,
-                                 QStringLiteral("Process changed"),
-                                 QStringLiteral("PID %1 no longer refers to the process shown in the alert. Nothing was closed or killed.").arg(process.root.pid));
-            emit immediateRefreshRequested();
-            return;
-        }
-
-#ifdef Q_OS_WIN
-        if (wantsClose) {
-            acted = requestCloseWindows(process.root.pid);
-        } else if (wantsKill) {
-            HANDLE handle = OpenProcess(PROCESS_TERMINATE, FALSE, DWORD(process.root.pid));
-            if (handle) {
-                acted = TerminateProcess(handle, 1) != 0;
-                CloseHandle(handle);
-            }
-        }
-#else
-        if (wantsClose) {
-            acted = (::kill(process.root.pid, SIGTERM) == 0);
-        } else if (wantsKill) {
-            acted = (::kill(process.root.pid, SIGKILL) == 0);
-        }
-#endif
+    const QString error = actOnProcess(process.root, wantsKill);
+    if (!error.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("Process action failed"), error);
+        emit immediateRefreshRequested();
+        return;
     }
 
-    if (acted) {
-        QTimer::singleShot(120, this, [this] { emit immediateRefreshRequested(); });
-        QTimer::singleShot(600, this, [this] { emit immediateRefreshRequested(); });
-    }
+    QTimer::singleShot(120, this, [this] { emit immediateRefreshRequested(); });
+    QTimer::singleShot(600, this, [this] { emit immediateRefreshRequested(); });
 }
 
 int AlertWindow::contentHeightForRows(int rows) const {
