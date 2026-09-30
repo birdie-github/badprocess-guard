@@ -385,6 +385,23 @@ QString ProcessMonitor::basenameOfArgv0(const ProcInfo &info) {
     if (!info.argv.isEmpty()) {
         QString argv0 = info.argv.first().trimmed();
 
+        QString windowsPath = argv0;
+        if (windowsPath.size() >= 2 && windowsPath.startsWith(QLatin1Char('"')) &&
+            windowsPath.endsWith(QLatin1Char('"'))) {
+            windowsPath = windowsPath.mid(1, windowsPath.size() - 2);
+        }
+        const bool drivePath = windowsPath.size() >= 3 && windowsPath.at(0).isLetter() &&
+                               windowsPath.at(1) == QLatin1Char(':') &&
+                               (windowsPath.at(2) == QLatin1Char('\\') || windowsPath.at(2) == QLatin1Char('/'));
+        const bool uncPath = windowsPath.startsWith(QStringLiteral("\\\\"));
+        if (drivePath || uncPath) {
+            // Wine exposes Windows executable paths in argv[0]. Spaces are
+            // part of the path, and backslashes are separators even on Linux.
+            const int separator = qMax(windowsPath.lastIndexOf(QLatin1Char('\\')),
+                                       windowsPath.lastIndexOf(QLatin1Char('/')));
+            return windowsPath.mid(separator + 1);
+        }
+
 #ifndef Q_OS_WIN
         // /proc/<pid>/cmdline is normally NUL-separated, but be defensive:
         // if argv[0] somehow arrives as a full command line, QFileInfo() would
