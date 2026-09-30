@@ -119,7 +119,7 @@ Opacity=50
 DarkMode=true
 AnimateNames=true
 AnimationColor=#ff0000
-AnimationDuration=1000
+AnimationDuration=3000
 Font=
 AllWorkspaces=false
 TreeThreshold=50
@@ -129,7 +129,7 @@ ProcessThreshold=50
 `RefreshInterval`, `AlertDuration`, and `AnimationDuration` are expressed in milliseconds.
 
 Active process names pulse together between the theme text color and `AnimationColor`.
-`AnimationDuration` is the time for each direction (100–999000 ms); the default full cycle is two seconds.
+`AnimationDuration` is the time for each direction (100–999000 ms); the default full cycle is six seconds.
 Updates use one fixed 100 ms timer, which stops when no displayed process is active or `AnimateNames` is disabled.
 Recovered processes return to their normal text color during the alert hold duration.
 

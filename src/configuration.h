@@ -68,7 +68,7 @@ private:
     int m_alertDuration = 3000;
     bool m_animateNames = true;
     QColor m_animationColor = QColor(QStringLiteral("#ff0000"));
-    int m_animationDuration = 1000;
+    int m_animationDuration = 3000;
     double m_treeThresholdPercent = 50.0;
     double m_processThresholdPercent = 50.0;
     bool m_deferSaves = false;

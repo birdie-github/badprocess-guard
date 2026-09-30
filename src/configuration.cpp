@@ -11,7 +11,7 @@ Configuration::Configuration(QObject *parent)
 }
 
 void Configuration::load() {
-	m_hasWindowPosition = false;
+    m_hasWindowPosition = false;
     m_settings.beginGroup(QStringLiteral("Settings"));
 
     m_opacityPercent = qBound(10, m_settings.value(QStringLiteral("Opacity"), 50).toInt(), 100);
@@ -21,7 +21,7 @@ void Configuration::load() {
     if (!m_animationColor.isValid())
         m_animationColor = QColor(QStringLiteral("#ff0000"));
     m_animationColor.setAlpha(255);
-    m_animationDuration = qBound(100, m_settings.value(QStringLiteral("AnimationDuration"), 1000).toInt(), 999000);
+    m_animationDuration = qBound(100, m_settings.value(QStringLiteral("AnimationDuration"), 3000).toInt(), 999000);
     m_allWorkspaces = m_settings.value(QStringLiteral("AllWorkspaces"), false).toBool();
     m_refreshInterval = qMax(250, m_settings.value(QStringLiteral("RefreshInterval"), 5000).toInt());
     m_alertDuration = qMax(0, m_settings.value(QStringLiteral("AlertDuration"), 3000).toInt());
