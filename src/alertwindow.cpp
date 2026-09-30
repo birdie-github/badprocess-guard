@@ -201,6 +201,8 @@ void AlertWindow::applyProcessRows(const QVector<BadProcess> &processes, int vis
 
     while (m_entries.size() < visibleRows) {
         auto *entry = new ProcessEntryWidget(this);
+        entry->setDarkMode(m_config->darkMode());
+        entry->setCustomFontEnabled(m_config->useCustomFont(), m_config->customFont());
         connect(entry, &ProcessEntryWidget::terminateRequested, this, &AlertWindow::confirmTerminate);
         m_layout->addWidget(entry);
         m_entries.append(entry);
@@ -216,8 +218,6 @@ void AlertWindow::applyProcessRows(const QVector<BadProcess> &processes, int vis
             m_entries[i]->setProcess(processes[i]);
         else
             m_entries[i]->setEmpty();
-        m_entries[i]->setDarkMode(m_config->darkMode());
-        m_entries[i]->setCustomFontEnabled(m_config->useCustomFont(), m_config->customFont());
     }
 }
 
@@ -338,7 +338,16 @@ void AlertWindow::animateToContentHeight() {
         QTimer::singleShot(200, this, &AlertWindow::applyAllWorkspacesHint);
     }
 
+    if (m_animation->state() == QAbstractAnimation::Running &&
+        m_animation->endValue().toInt() == targetHeight) {
+        return;
+    }
+
     m_animation->stop();
+    if (m_animatedHeight == targetHeight) {
+        setAnimatedHeight(targetHeight);
+        return;
+    }
     m_animation->setStartValue(height());
     m_animation->setEndValue(targetHeight);
     m_animation->start();
