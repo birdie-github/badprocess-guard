@@ -1,6 +1,7 @@
 #include "configuration.h"
 
 #include <QtGlobal>
+#include <QUuid>
 
 Configuration::Configuration(QObject *parent)
     : QObject(parent),
@@ -40,6 +41,7 @@ void Configuration::load() {
     }
 
     m_settings.endGroup();
+    loadIgnoreRules();
 }
 
 void Configuration::saveWindowPosition()
@@ -68,6 +70,7 @@ void Configuration::reloadFromDiskPreservingWindowPosition()
     m_windowPosition = windowPosition;
     m_hasWindowPosition = hasWindowPosition;
     emit changed();
+    emit ignoredApplicationsChanged();
     if (m_refreshInterval != refreshInterval || m_alertDuration != alertDuration ||
         !qFuzzyCompare(m_treeThresholdPercent + 1.0, treeThreshold + 1.0) ||
         !qFuzzyCompare(m_processThresholdPercent + 1.0, processThreshold + 1.0)) {
@@ -231,4 +234,84 @@ void Configuration::setAnimationDuration(int ms) {
     m_animationDuration = ms;
     scheduleSave();
     emit changed();
+}
+
+void Configuration::loadIgnoreRules() {
+    m_ignoredApplications.clear();
+    const int count = m_settings.beginReadArray(QStringLiteral("IgnoredApplications"));
+    for (int i = 0; i < count; ++i) {
+        m_settings.setArrayIndex(i);
+        IgnoreRule rule;
+        rule.id = m_settings.value(QStringLiteral("Id")).toString();
+        rule.label = m_settings.value(QStringLiteral("Name")).toString();
+        rule.path = m_settings.value(QStringLiteral("Path")).toString();
+        rule.applicationKey = m_settings.value(QStringLiteral("ApplicationKey")).toString();
+        rule.permanent = m_settings.value(QStringLiteral("Permanent"), false).toBool();
+        rule.tree = m_settings.value(QStringLiteral("Tree"), false).toBool();
+        rule.pid = m_settings.value(QStringLiteral("Pid"), -1).toInt();
+        rule.startTime = m_settings.value(QStringLiteral("StartTime")).toULongLong();
+        rule.bootId = m_settings.value(QStringLiteral("BootId")).toString();
+        if (rule.id.isEmpty() || (rule.permanent ? rule.applicationKey.isEmpty()
+                : (rule.pid <= 0 || rule.startTime == 0 || rule.bootId.isEmpty())))
+            continue;
+        m_ignoredApplications.append(rule);
+    }
+    m_settings.endArray();
+}
+
+void Configuration::saveIgnoreRules() {
+    // These are immediate actions, independent of deferred appearance edits.
+    m_settings.remove(QStringLiteral("IgnoredApplications"));
+    m_settings.beginWriteArray(QStringLiteral("IgnoredApplications"), m_ignoredApplications.size());
+    for (int i = 0; i < m_ignoredApplications.size(); ++i) {
+        m_settings.setArrayIndex(i);
+        const IgnoreRule &rule = m_ignoredApplications.at(i);
+        m_settings.setValue(QStringLiteral("Id"), rule.id);
+        m_settings.setValue(QStringLiteral("Name"), rule.label);
+        m_settings.setValue(QStringLiteral("Path"), rule.path);
+        m_settings.setValue(QStringLiteral("ApplicationKey"), rule.applicationKey);
+        m_settings.setValue(QStringLiteral("Permanent"), rule.permanent);
+        m_settings.setValue(QStringLiteral("Tree"), rule.tree);
+        if (!rule.permanent) {
+            m_settings.setValue(QStringLiteral("Pid"), rule.pid);
+            m_settings.setValue(QStringLiteral("StartTime"), QString::number(rule.startTime));
+            m_settings.setValue(QStringLiteral("BootId"), rule.bootId);
+        }
+    }
+    m_settings.endArray();
+    m_settings.sync();
+}
+
+void Configuration::addIgnoreRule(IgnoreRule rule) {
+    for (IgnoreRule &existing : m_ignoredApplications) {
+        const bool sameTarget = rule.permanent == existing.permanent &&
+            (rule.permanent ? rule.applicationKey == existing.applicationKey
+             : rule.pid == existing.pid && rule.startTime == existing.startTime && rule.bootId == existing.bootId);
+        if (!sameTarget)
+            continue;
+        if (rule.tree && !existing.tree) {
+            existing.tree = true;
+            saveIgnoreRules();
+            emit ignoredApplicationsChanged();
+        }
+        return;
+    }
+    rule.id = QUuid::createUuid().toString();
+    m_ignoredApplications.append(rule);
+    saveIgnoreRules();
+    emit ignoredApplicationsChanged();
+}
+
+void Configuration::removeIgnoreRules(const QStringList &ids) {
+    bool removed = false;
+    for (int i = m_ignoredApplications.size() - 1; i >= 0; --i) {
+        if (ids.contains(m_ignoredApplications.at(i).id)) {
+            m_ignoredApplications.removeAt(i);
+            removed = true;
+        }
+    }
+    if (removed) {
+        saveIgnoreRules();
+        emit ignoredApplicationsChanged();
+    }
 }

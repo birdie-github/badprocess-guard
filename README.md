@@ -75,6 +75,22 @@ The alert intentionally contains only the essential information:
 
 Full process details remain available in the tooltip and termination dialog.
 
+## Ignoring applications
+
+The stop button's **Ignore…** action offers:
+
+* **Ignore this application permanently** — suppress alerts for all runs at the same executable path. Updates at that path remain ignored; moving the executable requires a new exclusion.
+* **Ignore until this process exits** — suppress alerts for this particular run. The rule survives restarting Guard, but not process exit or PID reuse.
+* **Cancel** — make no change.
+
+For an aggregated alert, the exclusion covers the root and its current and future descendants while they belong to that tree. A temporary tree exclusion ends when the root exits. Individual-process exclusions suppress only that process's own alerts; its CPU usage still contributes to any monitored parent tree.
+
+Exclusions take effect immediately, including lingering alerts and name animation. They never close, suspend, or otherwise alter the application. Both kinds of exclusion can be removed in **Settings → Ignored applications**; alerts are then eligible again at the next normal sample. Rules are saved immediately, independently of other Settings edits. Expired temporary rules are removed automatically; unreadable process information alone is not treated as proof of exit.
+
+Permanent exclusions use full executable paths, not display names or filename fragments. Native Linux paths are case-sensitive; native Windows paths are compared case-insensitively. For scripts, the executable can be the interpreter: inspect the displayed path before ignoring it permanently. Wine exclusions include the Wine prefix and Windows executable path (or a verified Unix executable path when Wine exposes one). If that identity cannot be resolved, permanent exclusion is unavailable rather than ignoring the Wine loader. Different Wine path representations may require separate exclusions.
+
+Temporary Linux rules use PID, start time, and the kernel boot ID. Windows rules use PID and the absolute creation time. Temporary exclusions therefore cannot silently transfer to a new process that reuses the PID. Removing the INI's `IgnoredApplications` array also removes all exclusions.
+
 ## Closing processes
 
 The stop button opens a confirmation dialog.

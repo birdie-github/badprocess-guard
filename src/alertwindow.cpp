@@ -175,8 +175,8 @@ static QRect availableGeometryForRestoreScreen() {
     return QRect(0, 0, 1024, 768);
 }
 
-AlertWindow::AlertWindow(Configuration *config, QWidget *parent)
-    : QFrame(parent), m_config(config) {
+AlertWindow::AlertWindow(Configuration *config, ProcessMonitor *monitor, QWidget *parent)
+    : QFrame(parent), m_config(config), m_monitor(monitor) {
     setWindowFlags(Qt::FramelessWindowHint | Qt::Tool | Qt::WindowStaysOnTopHint);
     setAttribute(Qt::WA_TranslucentBackground, true);
     setAttribute(Qt::WA_ShowWithoutActivating, true);
@@ -421,8 +421,9 @@ void AlertWindow::confirmTerminate(BadProcess process) {
     // Own a copy: box.exec() keeps sampling active, so the originating row may
     // be updated or reassigned before the user confirms the action.
     QMessageBox box(this);
-    box.setWindowTitle(QStringLiteral("Close or kill application?"));
-    box.setText(QStringLiteral("Close or kill %1 PID %2?").arg(process.label).arg(process.root.pid));
+    box.setWindowTitle(QStringLiteral("Application actions"));
+    box.setTextFormat(Qt::PlainText);
+    box.setText(QStringLiteral("%1 — PID %2").arg(process.label).arg(process.root.pid));
 #ifdef Q_OS_WIN
     box.setInformativeText(QStringLiteral("%1\n\nCPU tree: %2%\n\nClose: asks the application's top-level windows to close.\nKill: forcibly terminates the process with TerminateProcess().")
                                .arg(process.command)
@@ -434,6 +435,8 @@ void AlertWindow::confirmTerminate(BadProcess process) {
 #endif
     QPushButton *close = box.addButton(QStringLiteral("Close"), QMessageBox::AcceptRole);
     QPushButton *kill = box.addButton(QStringLiteral("Kill"), QMessageBox::DestructiveRole);
+    QPushButton *ignore = box.addButton(QStringLiteral("Ignore…"), QMessageBox::ActionRole);
+    ignore->setToolTip(QStringLiteral("Stop alerts for this application or just this run, without closing it."));
 #ifdef Q_OS_WIN
     close->setToolTip(QStringLiteral("Post WM_CLOSE to top-level windows owned by this PID."));
     kill->setToolTip(QStringLiteral("Forcibly terminate this PID with TerminateProcess()."));
@@ -441,8 +444,14 @@ void AlertWindow::confirmTerminate(BadProcess process) {
     close->setToolTip(QStringLiteral("Send SIGTERM to this PID."));
     kill->setToolTip(QStringLiteral("Send SIGKILL to this PID."));
 #endif
-    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(box.addButton(QMessageBox::Cancel));
+    box.setEscapeButton(QMessageBox::Cancel);
     box.exec();
+
+    if (box.clickedButton() == ignore) {
+        confirmIgnore(process);
+        return;
+    }
 
     const bool wantsClose = (box.clickedButton() == close);
     const bool wantsKill = (box.clickedButton() == kill);
@@ -458,6 +467,35 @@ void AlertWindow::confirmTerminate(BadProcess process) {
 
     QTimer::singleShot(120, this, [this] { emit immediateRefreshRequested(); });
     QTimer::singleShot(600, this, [this] { emit immediateRefreshRequested(); });
+}
+
+void AlertWindow::confirmIgnore(const BadProcess &process) {
+    QMessageBox box(this);
+    box.setWindowTitle(QStringLiteral("Ignore application"));
+    box.setTextFormat(Qt::PlainText);
+    box.setText(QStringLiteral("Ignore CPU alerts for %1 (PID %2)?").arg(process.label).arg(process.root.pid));
+    QString details = process.executablePath.isEmpty() ? process.command : process.executablePath;
+    details += process.tree
+        ? QStringLiteral("\n\nThis also suppresses alerts for its process tree, including new descendants while the root is running.")
+        : QStringLiteral("\n\nOnly this process is excluded. Its CPU usage still counts toward any monitored parent tree.");
+    details += QStringLiteral("\n\nYou can remove exclusions in Settings → Ignored applications.");
+    if (process.applicationKey.isEmpty())
+        details += QStringLiteral("\n\nPermanent exclusion unavailable: ") + process.ignoreUnavailableReason;
+    box.setInformativeText(details);
+    auto *permanent = box.addButton(QStringLiteral("Ignore this application permanently"), QMessageBox::AcceptRole);
+    auto *currentRun = box.addButton(QStringLiteral("Ignore until this process exits"), QMessageBox::ActionRole);
+    permanent->setEnabled(!process.applicationKey.isEmpty());
+    permanent->setToolTip(process.applicationKey.isEmpty() ? process.ignoreUnavailableReason
+        : QStringLiteral("Ignore all runs at this executable path, including after application updates."));
+    currentRun->setToolTip(QStringLiteral("Survives restarting Guard, but ends when this particular process exits."));
+    box.setDefaultButton(box.addButton(QMessageBox::Cancel));
+    box.setEscapeButton(QMessageBox::Cancel);
+    box.exec();
+    if (box.clickedButton() != permanent && box.clickedButton() != currentRun)
+        return;
+    const QString error = m_monitor->ignoreProcess(process, box.clickedButton() == permanent);
+    if (!error.isEmpty())
+        QMessageBox::warning(this, QStringLiteral("Cannot ignore application"), error);
 }
 
 int AlertWindow::contentHeightForRows(int rows) const {

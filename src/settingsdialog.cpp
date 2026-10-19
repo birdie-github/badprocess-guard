@@ -14,6 +14,9 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QVBoxLayout>
+#include <QTreeWidget>
+#include <QHeaderView>
+#include <QTabWidget>
 
 #include <limits>
 
@@ -103,8 +106,42 @@ SettingsDialog::SettingsDialog(Configuration *config, QWidget *parent)
     buttons->addStretch(1);
     buttons->addWidget(closeButton);
 
+    auto *tabs = new QTabWidget(this);
+    auto *general = new QWidget(tabs);
+    general->setLayout(form);
+    tabs->addTab(general, QStringLiteral("General"));
+
+    auto *ignored = new QWidget(tabs);
+    auto *ignoredLayout = new QVBoxLayout(ignored);
+    auto *explanation = new QLabel(QStringLiteral("Ignored applications keep running without CPU alerts. Remove an exclusion to allow alerts at the next sample."), ignored);
+    explanation->setWordWrap(true);
+    ignoredLayout->addWidget(explanation);
+    m_ignoredApplications = new QTreeWidget(ignored);
+    m_ignoredApplications->setHeaderLabels({QStringLiteral("Application"), QStringLiteral("Ignore until"), QStringLiteral("Scope"), QStringLiteral("Executable path")});
+    m_ignoredApplications->setRootIsDecorated(false);
+    m_ignoredApplications->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_ignoredApplications->setMinimumHeight(150);
+    m_ignoredApplications->header()->setStretchLastSection(true);
+    ignoredLayout->addWidget(m_ignoredApplications);
+    m_removeIgnored = new QPushButton(QStringLiteral("Remove selected"), ignored);
+    m_removeIgnored->setEnabled(false);
+    ignoredLayout->addWidget(m_removeIgnored, 0, Qt::AlignRight);
+    tabs->addTab(ignored, QStringLiteral("Ignored applications"));
+    connect(m_ignoredApplications, &QTreeWidget::itemSelectionChanged, this, [this] {
+        m_removeIgnored->setEnabled(!m_ignoredApplications->selectedItems().isEmpty());
+    });
+    connect(m_removeIgnored, &QPushButton::clicked, this, [this] {
+        QStringList ids;
+        for (QTreeWidgetItem *item : m_ignoredApplications->selectedItems())
+            ids.append(item->data(0, Qt::UserRole).toString());
+        m_config->removeIgnoreRules(ids);
+    });
+    connect(m_config, &Configuration::ignoredApplicationsChanged,
+            this, &SettingsDialog::refreshIgnoredApplications);
+    refreshIgnoredApplications();
+
     auto *mainLayout = new QVBoxLayout(this);
-    mainLayout->addLayout(form);
+    mainLayout->addWidget(tabs);
     mainLayout->addLayout(buttons);
 
     refreshFromConfig();
@@ -177,4 +214,27 @@ void SettingsDialog::refreshFromConfig() {
     m_treeThreshold->setValue(m_config->treeThresholdPercent());
     m_processThreshold->setValue(m_config->processThresholdPercent());
     m_allWorkspaces->setChecked(m_config->allWorkspaces());
+}
+
+void SettingsDialog::refreshIgnoredApplications() {
+    QStringList selected;
+    for (QTreeWidgetItem *item : m_ignoredApplications->selectedItems())
+        selected.append(item->data(0, Qt::UserRole).toString());
+    const QSignalBlocker blocker(m_ignoredApplications);
+    m_ignoredApplications->clear();
+    for (const IgnoreRule &rule : m_config->ignoredApplications()) {
+        auto *item = new QTreeWidgetItem(m_ignoredApplications);
+        item->setText(0, rule.label);
+        item->setText(1, rule.permanent ? QStringLiteral("Removed manually")
+                                      : QStringLiteral("PID %1 exits").arg(rule.pid));
+        item->setText(2, rule.tree ? QStringLiteral("Process tree") : QStringLiteral("Process"));
+        item->setText(3, rule.path.isEmpty() ? QStringLiteral("Unavailable") : rule.path);
+        item->setData(0, Qt::UserRole, rule.id);
+        for (int column = 0; column < 4; ++column)
+            item->setToolTip(column, item->text(column));
+        item->setSelected(selected.contains(rule.id));
+    }
+    for (int column = 0; column < 3; ++column)
+        m_ignoredApplications->resizeColumnToContents(column);
+    m_removeIgnored->setEnabled(!m_ignoredApplications->selectedItems().isEmpty());
 }

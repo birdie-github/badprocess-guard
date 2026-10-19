@@ -22,6 +22,8 @@ inline uint qHash(const ProcessIdentity &id, uint seed = 0) {
     return qHash(qMakePair(id.pid, id.startTime), seed);
 }
 
+class Configuration;
+
 struct BadProcess {
     QString label;
     ProcessIdentity root;
@@ -29,13 +31,18 @@ struct BadProcess {
     double cpuPercent = 0.0;
     int processCount = 0;
     bool active = true;
+    bool tree = false;
+    QString applicationKey = {};
+    QString executablePath = {};
+    QString ignoreUnavailableReason = {};
 };
 
 class ProcessMonitor : public QObject {
     Q_OBJECT
 
 public:
-    explicit ProcessMonitor(QObject *parent = nullptr);
+    explicit ProcessMonitor(Configuration *config, QObject *parent = nullptr);
+    QString ignoreProcess(const BadProcess &process, bool permanent);
 
     int intervalMs() const { return m_intervalMs; }
     double treeThresholdPercent() const { return m_treeThresholdPercent; }
@@ -84,6 +91,19 @@ private:
 
     using Snapshot = QHash<int, ProcInfo>;
 
+    struct ApplicationIdentity {
+        QString key;
+        QString path;
+        QString error;
+    };
+    enum class RunState { Running, Ended, Unknown };
+    static RunState runState(const ProcessIdentity &id);
+    static QString bootIdentity();
+    static ApplicationIdentity applicationIdentity(const ProcInfo &info);
+    void describeApplication(BadProcess *process, const ProcInfo &info) const;
+    void pruneIgnoreRules();
+    QVector<BadProcess> filterIgnored(const QVector<BadProcess> &bad, const Snapshot &snapshot) const;
+    void ignoredApplicationsChanged();
     Snapshot readSnapshot() const;
     static bool readProc(int pid, ProcInfo *info);
     static QString basenameOfArgv0(const ProcInfo &info);
@@ -106,6 +126,8 @@ private:
                                      QSet<ProcessIdentity> *treeRootsSeen) const;
     QVector<BadProcess> measureLeaves(const Snapshot &before, const Snapshot &after, double elapsedSeconds, const QSet<ProcessIdentity> &suppressedMembers) const;
 
+    Configuration *m_config;
+    QString m_bootId;
     QTimer m_timer;
     QTimer m_expiryTimer;
     QElapsedTimer m_clock;

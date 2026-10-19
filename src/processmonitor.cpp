@@ -1,4 +1,5 @@
 #include "processmonitor.h"
+#include "configuration.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -23,6 +24,8 @@
 #include <tlhelp32.h>
 #else
 #include <unistd.h>
+#include <cerrno>
+#include <fcntl.h>
 #endif
 
 static double cpuPercent(quint64 beforeUnits, quint64 afterUnits, double elapsedSeconds, double unitsPerSecond) {
@@ -33,7 +36,10 @@ static double cpuPercent(quint64 beforeUnits, quint64 afterUnits, double elapsed
     return 100.0 * double(afterUnits - beforeUnits) / (unitsPerSecond * elapsedSeconds);
 }
 
-ProcessMonitor::ProcessMonitor(QObject *parent) : QObject(parent) {
+ProcessMonitor::ProcessMonitor(Configuration *config, QObject *parent)
+    : QObject(parent), m_config(config), m_bootId(bootIdentity()) {
+    connect(m_config, &Configuration::ignoredApplicationsChanged,
+            this, &ProcessMonitor::ignoredApplicationsChanged);
 #ifdef Q_OS_WIN
     // GetProcessTimes() returns 100 ns units.  Do not divide by CPU count:
     // one fully busy logical CPU must be reported as ~100%, not Task
@@ -58,6 +64,7 @@ ProcessMonitor::ProcessMonitor(QObject *parent) : QObject(parent) {
 void ProcessMonitor::start() {
     if (!m_clock.isValid())
         m_clock.start();
+    pruneIgnoreRules();
     m_previous = readSnapshot();
     m_previousNs = m_clock.nsecsElapsed();
     if (m_debug) {
@@ -120,13 +127,25 @@ void ProcessMonitor::sampleInternal(bool honorLinger) {
     }
 #endif
 
+    pruneIgnoreRules();
     const Snapshot current = readSnapshot();
     const qint64 nowNs = m_clock.nsecsElapsed();
     const qint64 nowMs = nowNs / 1000000LL;
     const double elapsed = qMax(0.001, double(nowNs - m_previousNs) / 1000000000.0);
 
     const QVector<BadProcess> currentBad = measureBadProcesses(m_previous, current, elapsed);
-    const QVector<BadProcess> bad = applyLinger(currentBad, nowMs, honorLinger);
+    const QVector<BadProcess> bad = filterIgnored(applyLinger(currentBad, nowMs, honorLinger), current);
+    QSet<ProcessIdentity> visible;
+    for (const BadProcess &process : bad)
+        visible.insert(process.root);
+    for (auto it = m_recentProcesses.begin(); it != m_recentProcesses.end();) {
+        if (!visible.contains(it.key())) {
+            m_recentLastSeenMs.remove(it.key());
+            it = m_recentProcesses.erase(it);
+        } else {
+            ++it;
+        }
+    }
 
     if (m_debug) {
         QStringList summary;
@@ -185,6 +204,10 @@ void ProcessMonitor::emitIfChanged(const QVector<BadProcess> &bad) {
                 bad[i].command != m_lastEmitted[i].command ||
                 bad[i].processCount != m_lastEmitted[i].processCount ||
                 bad[i].active != m_lastEmitted[i].active ||
+                bad[i].tree != m_lastEmitted[i].tree ||
+                bad[i].applicationKey != m_lastEmitted[i].applicationKey ||
+                bad[i].executablePath != m_lastEmitted[i].executablePath ||
+                bad[i].ignoreUnavailableReason != m_lastEmitted[i].ignoreUnavailableReason ||
                 qAbs(bad[i].cpuPercent - m_lastEmitted[i].cpuPercent) >= 0.5) {
                 changed = true;
                 break;
@@ -527,8 +550,12 @@ QString ProcessMonitor::displayNameFor(const ProcInfo &info) const {
 
 QHash<int, QVector<int>> ProcessMonitor::buildChildren(const Snapshot &snapshot) {
     QHash<int, QVector<int>> children;
-    for (const ProcInfo &info : snapshot)
-        children[info.ppid].append(info.id.pid);
+    for (const ProcInfo &info : snapshot) {
+        const auto parent = snapshot.constFind(info.ppid);
+        // Windows retains the original parent PID even after that parent exits.
+        if (parent != snapshot.constEnd() && parent->id.startTime <= info.id.startTime)
+            children[info.ppid].append(info.id.pid);
+    }
     return children;
 }
 
@@ -677,7 +704,10 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
             badTreeMembers->insert(member);
 
         if (percent >= m_treeThresholdPercent) {
-            bad.append({label, root.id, commandOf(root), percent, counted});
+            BadProcess process{label, root.id, commandOf(root), percent, counted};
+            process.tree = true;
+            describeApplication(&process, root);
+            bad.append(process);
         }
     }
 
@@ -710,7 +740,265 @@ QVector<BadProcess> ProcessMonitor::measureLeaves(const Snapshot &before, const 
                                  .arg(percent, 0, 'f', 1)
                                  .arg(commandOf(process));
         }
-        bad.append({label, process.id, commandOf(process), percent, 1});
+        BadProcess alert{label, process.id, commandOf(process), percent, 1};
+        describeApplication(&alert, process);
+        bad.append(alert);
     }
     return bad;
+}
+
+QString ProcessMonitor::bootIdentity() {
+#ifdef Q_OS_WIN
+    // Windows creation times are absolute FILETIMEs, unlike Linux boot ticks.
+    return QStringLiteral("windows-filetime");
+#else
+    QFile file(QStringLiteral("/proc/sys/kernel/random/boot_id"));
+    if (!file.open(QIODevice::ReadOnly))
+        return QString();
+    const QString boot = QString::fromLatin1(file.readAll()).trimmed();
+    return boot.isEmpty() ? QString() : QStringLiteral("linux:") + boot;
+#endif
+}
+
+ProcessMonitor::RunState ProcessMonitor::runState(const ProcessIdentity &id) {
+    if (id.pid <= 0 || id.startTime == 0)
+        return RunState::Unknown;
+#ifdef Q_OS_WIN
+    HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, DWORD(id.pid));
+    if (!handle)
+        return GetLastError() == ERROR_INVALID_PARAMETER ? RunState::Ended : RunState::Unknown;
+    FILETIME creation, exit, kernel, user;
+    const bool ok = GetProcessTimes(handle, &creation, &exit, &kernel, &user);
+    CloseHandle(handle);
+    if (!ok)
+        return RunState::Unknown;
+    ULARGE_INTEGER start;
+    start.LowPart = creation.dwLowDateTime;
+    start.HighPart = creation.dwHighDateTime;
+    return start.QuadPart == id.startTime && exit.dwLowDateTime == 0 && exit.dwHighDateTime == 0
+        ? RunState::Running : RunState::Ended;
+#else
+    const QByteArray path = QStringLiteral("/proc/%1/stat").arg(id.pid).toLocal8Bit();
+    const int fd = ::open(path.constData(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return errno == ENOENT || errno == ESRCH ? RunState::Ended : RunState::Unknown;
+    QFile file;
+    if (!file.open(fd, QIODevice::ReadOnly, QFileDevice::AutoCloseHandle)) {
+        ::close(fd);
+        return RunState::Unknown;
+    }
+    const QByteArray stat = file.readAll();
+    const int end = stat.lastIndexOf(')');
+    if (end < 0)
+        return RunState::Unknown;
+    const QList<QByteArray> fields = stat.mid(end + 2).simplified().split(' ');
+    if (fields.size() <= 19)
+        return RunState::Unknown;
+    bool ok = false;
+    const quint64 start = fields.at(19).toULongLong(&ok);
+    if (!ok)
+        return RunState::Unknown;
+    return start == id.startTime && fields.first() != "Z" && fields.first() != "X"
+        ? RunState::Running : RunState::Ended;
+#endif
+}
+
+ProcessMonitor::ApplicationIdentity ProcessMonitor::applicationIdentity(const ProcInfo &info) {
+    ApplicationIdentity result;
+    result.error = QStringLiteral("The executable path could not be verified. You can still ignore this run.");
+#ifdef Q_OS_WIN
+    // argv[0] comes from QueryFullProcessImageNameW, not the command line.
+    if (info.argv.isEmpty())
+        return result;
+    const QString path = QDir::fromNativeSeparators(info.argv.first());
+    if (!QDir::isAbsolutePath(path))
+        return result;
+    result.path = QDir::cleanPath(path);
+    result.key = QStringLiteral("windows:") + result.path.toCaseFolded();
+#else
+    QString executable = QFileInfo(QStringLiteral("/proc/%1/exe").arg(info.id.pid)).symLinkTarget();
+    if (executable.isEmpty())
+        return result;
+    // Package updates can unlink the old image while it is still running.
+    // Keep matching its original path, not the kernel's deletion annotation.
+    if (executable.endsWith(QStringLiteral(" (deleted)")) && !QFileInfo::exists(executable))
+        executable.chop(10);
+
+    QString argv0 = info.argv.value(0);
+    if (argv0.size() >= 2 && argv0.startsWith(QLatin1Char('"')) && argv0.endsWith(QLatin1Char('"')))
+        argv0 = argv0.mid(1, argv0.size() - 2);
+    const bool drivePath = argv0.size() >= 3 && argv0.at(0).isLetter() && argv0.at(1) == QLatin1Char(':') &&
+        (argv0.at(2) == QLatin1Char('\\') || argv0.at(2) == QLatin1Char('/'));
+    const bool uncPath = argv0.startsWith(QStringLiteral("\\\\"));
+    const QString loader = QFileInfo(executable).fileName();
+    const bool wineLoader = loader == QLatin1String("wine") || loader == QLatin1String("wine64") ||
+        loader == QLatin1String("wine-preloader") || loader == QLatin1String("wine64-preloader");
+    if (drivePath || uncPath || wineLoader) {
+        result.error = QStringLiteral("The Wine application and prefix could not be verified. Ignoring the Wine loader would affect other applications; use the current-run option instead.");
+        QFile environment(QStringLiteral("/proc/%1/environ").arg(info.id.pid));
+        if (!environment.open(QIODevice::ReadOnly))
+            return result;
+        QString prefix, home;
+        const QList<QByteArray> variables = environment.readAll().split('\0');
+        for (const QByteArray &variable : variables) {
+            if (variable.startsWith("WINEPREFIX="))
+                prefix = QString::fromLocal8Bit(variable.mid(11));
+            else if (variable.startsWith("HOME="))
+                home = QString::fromLocal8Bit(variable.mid(5));
+        }
+        if (prefix.isEmpty() && !home.isEmpty())
+            prefix = QDir(home).filePath(QStringLiteral(".wine"));
+        if (!QDir::isAbsolutePath(prefix))
+            return result;
+        prefix = QFileInfo(prefix).canonicalFilePath();
+        if (prefix.isEmpty())
+            return result;
+        if (drivePath || uncPath) {
+            QString windowsPath = QDir::cleanPath(argv0.replace(QLatin1Char('\\'), QLatin1Char('/')));
+            if (uncPath && !windowsPath.startsWith(QStringLiteral("//")))
+                windowsPath.prepend(QLatin1Char('/'));
+            result.path = QStringLiteral("%1 (Wine prefix: %2)").arg(windowsPath, prefix);
+            result.key = QStringLiteral("wine:") + prefix + QLatin1Char('\n') + windowsPath.toCaseFolded();
+        } else {
+            // Some Wine versions retain a Unix executable path in argv[0].
+            // Never substitute the loader when that path is unavailable.
+            const QString path = QDir::isAbsolutePath(argv0) ? QFileInfo(argv0).canonicalFilePath() : QString();
+            if (path.isEmpty() || path == executable ||
+                (!path.endsWith(QStringLiteral(".exe"), Qt::CaseInsensitive) &&
+                 !path.endsWith(QStringLiteral(".com"), Qt::CaseInsensitive)))
+                return result;
+            result.path = QStringLiteral("%1 (Wine prefix: %2)").arg(path, prefix);
+            result.key = QStringLiteral("wine-unix:") + prefix + QLatin1Char('\n') + path;
+        }
+    } else {
+        result.path = QDir::cleanPath(executable);
+        result.key = QStringLiteral("linux:") + result.path;
+    }
+    // Do not associate a replacement PID's executable with the sampled run.
+    if (runState(info.id) != RunState::Running) {
+        result.key.clear();
+        result.path.clear();
+        return result;
+    }
+#endif
+    result.error.clear();
+    return result;
+}
+
+void ProcessMonitor::describeApplication(BadProcess *process, const ProcInfo &info) const {
+    const ApplicationIdentity application = applicationIdentity(info);
+    process->applicationKey = application.key;
+    process->executablePath = application.path;
+    process->ignoreUnavailableReason = application.error;
+}
+
+QString ProcessMonitor::ignoreProcess(const BadProcess &process, bool permanent) {
+    IgnoreRule rule;
+    rule.label = process.label;
+    rule.path = process.executablePath;
+    rule.tree = process.tree;
+    rule.permanent = permanent;
+    if (permanent) {
+        // The copied alert identifies the application selected by the user,
+        // even if it has exited or exec'd something else during the dialog.
+        if (process.applicationKey.isEmpty())
+            return process.ignoreUnavailableReason.isEmpty()
+                ? QStringLiteral("The selected application's executable path is unavailable.")
+                : process.ignoreUnavailableReason;
+        rule.applicationKey = process.applicationKey;
+    } else {
+        if (m_bootId.isEmpty())
+            return QStringLiteral("The system boot identity is unavailable. A persistent current-run exclusion cannot be created safely.");
+        if (runState(process.root) != RunState::Running)
+            return QStringLiteral("The selected process has exited or its identity could not be verified. No exclusion was added.");
+        rule.pid = process.root.pid;
+        rule.startTime = process.root.startTime;
+        rule.bootId = m_bootId;
+    }
+    m_config->addIgnoreRule(rule);
+    return QString();
+}
+
+void ProcessMonitor::pruneIgnoreRules() {
+    QStringList expired;
+    for (const IgnoreRule &rule : m_config->ignoredApplications()) {
+        if (!rule.permanent && ((!m_bootId.isEmpty() && rule.bootId != m_bootId) ||
+            (rule.bootId == m_bootId && runState({rule.pid, rule.startTime}) == RunState::Ended)))
+            expired.append(rule.id);
+    }
+    // Access-denied/missing metadata is not proof of process exit.
+    m_config->removeIgnoreRules(expired);
+}
+
+QVector<BadProcess> ProcessMonitor::filterIgnored(const QVector<BadProcess> &bad, const Snapshot &snapshot) const {
+    const QVector<IgnoreRule> &rules = m_config->ignoredApplications();
+    if (rules.isEmpty())
+        return bad;
+    QHash<QString, bool> applications;
+    QHash<ProcessIdentity, bool> runs;
+    for (const IgnoreRule &rule : rules) {
+        if (rule.permanent)
+            applications[rule.applicationKey] = applications.value(rule.applicationKey) || rule.tree;
+        else if (!m_bootId.isEmpty() && rule.bootId == m_bootId) {
+            const ProcessIdentity id{rule.pid, rule.startTime};
+            runs[id] = runs.value(id) || rule.tree;
+        }
+    }
+    // Resolve only alert candidates and their ancestors, once per filter pass.
+    // Keep the complete snapshot intact so ignored children still contribute
+    // to the CPU totals of an otherwise monitored parent.
+    QHash<int, ApplicationIdentity> identities;
+    for (const BadProcess &process : bad) {
+        const auto info = snapshot.constFind(process.root.pid);
+        if (process.active && info != snapshot.constEnd() && info->id == process.root)
+            identities.insert(process.root.pid, {process.applicationKey, process.executablePath, process.ignoreUnavailableReason});
+    }
+    QVector<BadProcess> result;
+    for (const BadProcess &process : bad) {
+        bool ignored = runs.contains(process.root) || applications.contains(process.applicationKey);
+        auto current = snapshot.constFind(process.root.pid);
+        if (current != snapshot.constEnd() && !(current->id == process.root))
+            current = snapshot.constEnd();
+        QSet<int> visited;
+        bool ancestor = false;
+        while (!ignored && current != snapshot.constEnd() && !visited.contains(current->id.pid)) {
+            visited.insert(current->id.pid);
+            const auto run = runs.constFind(current->id);
+            ignored = run != runs.constEnd() && (!ancestor || run.value());
+            if (!ignored && !applications.isEmpty()) {
+                if (!identities.contains(current->id.pid))
+                    identities.insert(current->id.pid, applicationIdentity(*current));
+                const auto app = applications.constFind(identities.value(current->id.pid).key);
+                ignored = app != applications.constEnd() && (!ancestor || app.value());
+            }
+            const auto parent = snapshot.constFind(current->ppid);
+            // On Windows a dead parent's PID can refer to an unrelated newer process.
+            if (parent == snapshot.constEnd() || parent->id.startTime > current->id.startTime)
+                break;
+            current = parent;
+            ancestor = true;
+        }
+        if (!ignored)
+            result.append(process);
+    }
+    return result;
+}
+
+void ProcessMonitor::ignoredApplicationsChanged() {
+    const QVector<BadProcess> visible = filterIgnored(m_lastEmitted, m_previous);
+    QSet<ProcessIdentity> retained;
+    for (const BadProcess &process : visible)
+        retained.insert(process.root);
+    for (auto it = m_recentProcesses.begin(); it != m_recentProcesses.end();) {
+        if (!retained.contains(it.key())) {
+            m_recentLastSeenMs.remove(it.key());
+            it = m_recentProcesses.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    emitIfChanged(visible);
+    scheduleExpiryTimer(monotonicMs());
+    // Removing a rule restores alerts at the next normal CPU sample. Do not
+    // shorten the measurement window or reset the sampling timer for this UI action.
 }

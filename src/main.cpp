@@ -48,7 +48,7 @@ int main(int argc, char **argv) {
     Configuration config;
     QObject::connect(&app, &QCoreApplication::aboutToQuit,
                      &config, &Configuration::endDeferredSave);
-    ProcessMonitor monitor;
+    ProcessMonitor monitor(&config);
     monitor.setIntervalMs(parser.isSet(intervalOpt) ? parser.value(intervalOpt).toInt() : config.refreshInterval());
     monitor.setTreeThresholdPercent(parser.isSet(thresholdOpt) ? parser.value(thresholdOpt).toDouble() : config.treeThresholdPercent());
     monitor.setProcessThresholdPercent(parser.isSet(processThresholdOpt) ? parser.value(processThresholdOpt).toDouble() : config.processThresholdPercent());
@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
         monitor.refreshNow();
     });
 
-    AlertWindow window(&config);
+    AlertWindow window(&config, &monitor);
     QObject::connect(&monitor, &ProcessMonitor::badProcessesChanged,
                      &window, &AlertWindow::setBadProcesses);
     QObject::connect(&window, &AlertWindow::immediateRefreshRequested,

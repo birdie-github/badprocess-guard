@@ -10,6 +10,7 @@ class QPushButton;
 class QSlider;
 class QSpinBox;
 class QDoubleSpinBox;
+class QTreeWidget;
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
@@ -19,6 +20,9 @@ public:
     void refreshFromConfig();
 
 private:
+    void refreshIgnoredApplications();
+    QTreeWidget *m_ignoredApplications = nullptr;
+    QPushButton *m_removeIgnored = nullptr;
     Configuration *m_config = nullptr;
     QSlider *m_opacitySlider = nullptr;
     QLabel *m_opacityValue = nullptr;

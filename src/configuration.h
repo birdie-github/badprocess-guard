@@ -1,5 +1,9 @@
 #pragma once
 
+#include "ignorerule.h"
+
+#include <QVector>
+#include <QStringList>
 #include <QColor>
 #include <QFont>
 #include <QObject>
@@ -28,6 +32,10 @@ public:
     double processThresholdPercent() const { return m_processThresholdPercent; }
     void reloadFromDiskPreservingWindowPosition();
 
+    const QVector<IgnoreRule> &ignoredApplications() const { return m_ignoredApplications; }
+    void addIgnoreRule(IgnoreRule rule);
+    void removeIgnoreRules(const QStringList &ids);
+
     void beginDeferredSave();
     void endDeferredSave();
 
@@ -49,14 +57,18 @@ public slots:
 signals:
     void changed();
     void monitoringChanged();
+    void ignoredApplicationsChanged();
 
 private:
     void load();
+    void loadIgnoreRules();
+    void saveIgnoreRules();
     void save();
     void saveWindowPosition();
     void scheduleSave();
 
     QSettings m_settings;
+    QVector<IgnoreRule> m_ignoredApplications;
     int m_opacityPercent = 50;
     bool m_darkMode = true;
     bool m_useCustomFont = false;

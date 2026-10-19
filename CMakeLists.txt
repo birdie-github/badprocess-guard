@@ -24,6 +24,7 @@ add_executable(badprocess-guard
     src/main.cpp
     src/configuration.cpp
     src/configuration.h
+    src/ignorerule.h
     src/processmonitor.cpp
     src/processmonitor.h
     src/processentrywidget.cpp

@@ -19,7 +19,7 @@ class AlertWindow : public QFrame {
     Q_PROPERTY(int animatedHeight READ animatedHeight WRITE setAnimatedHeight)
 
 public:
-    explicit AlertWindow(Configuration *config, QWidget *parent = nullptr);
+    explicit AlertWindow(Configuration *config, ProcessMonitor *monitor, QWidget *parent = nullptr);
 
     int animatedHeight() const { return m_animatedHeight; }
     void setAnimatedHeight(int height);
@@ -45,6 +45,7 @@ private:
     void animateToContentHeight();
     void applyProcessRows(const QVector<BadProcess> &processes, int visibleRows);
     void confirmTerminate(BadProcess process);
+    void confirmIgnore(const BadProcess &process);
     int contentHeightForRows(int rows) const;
     int contentWidth() const;
     void positionSettingsButton();
@@ -53,6 +54,7 @@ private:
     QPoint clampedPosition(const QPoint &pos) const;
 
     Configuration *m_config = nullptr;
+    ProcessMonitor *m_monitor = nullptr;
     QVBoxLayout *m_layout = nullptr;
     QToolButton *m_settingsButton = nullptr;
     QVector<ProcessEntryWidget *> m_entries;
