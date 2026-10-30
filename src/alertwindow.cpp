@@ -16,6 +16,10 @@
 #include <QVBoxLayout>
 #include <QResizeEvent>
 #include <QTimer>
+#ifdef Q_OS_LINUX
+#include <QRegion>
+#include <QWindow>
+#endif
 
 #include <cstring>
 
@@ -177,7 +181,15 @@ static QRect availableGeometryForRestoreScreen() {
 
 AlertWindow::AlertWindow(Configuration *config, ProcessMonitor *monitor, QWidget *parent)
     : QFrame(parent), m_config(config), m_monitor(monitor) {
+#ifdef Q_OS_LINUX
+    // A Linux build can run with either the wayland or xcb QPA plugin.
+    m_nativeWayland = QGuiApplication::platformName().startsWith(QStringLiteral("wayland"));
+#endif
     setWindowFlags(Qt::FramelessWindowHint | Qt::Tool | Qt::WindowStaysOnTopHint);
+#ifdef Q_OS_LINUX
+    if (m_nativeWayland)
+        setWindowFlag(Qt::WindowDoesNotAcceptFocus, true);
+#endif
     setAttribute(Qt::WA_TranslucentBackground, true);
     setAttribute(Qt::WA_ShowWithoutActivating, true);
     setMouseTracking(true);
@@ -213,6 +225,14 @@ AlertWindow::AlertWindow(Configuration *config, ProcessMonitor *monitor, QWidget
 
 void AlertWindow::setAnimatedHeight(int height) {
     m_animatedHeight = qMax(0, height);
+#ifdef Q_OS_LINUX
+    if (m_nativeWayland) {
+        // A zero-sized/unmapped surface loses its compositor-chosen position.
+        setFixedHeight(qMax(1, height));
+        update();
+        return;
+    }
+#endif
 #ifdef Q_OS_WIN
     // Keep valid native geometry while the logical height is zero. The window
     // is still hidden below when an empty alert finishes collapsing.
@@ -265,6 +285,14 @@ void AlertWindow::applyProcessRows(const QVector<BadProcess> &processes, int vis
 
 void AlertWindow::paintEvent(QPaintEvent *event) {
     Q_UNUSED(event)
+#ifdef Q_OS_LINUX
+    if (m_nativeWayland && m_processes.isEmpty()) {
+        QPainter painter(this);
+        painter.setCompositionMode(QPainter::CompositionMode_Source);
+        painter.fillRect(rect(), Qt::transparent);
+        return;
+    }
+#endif
     if (height() <= 0)
         return;
 
@@ -281,6 +309,18 @@ void AlertWindow::paintEvent(QPaintEvent *event) {
 
 void AlertWindow::mousePressEvent(QMouseEvent *event) {
     if (event->button() == Qt::LeftButton) {
+#ifdef Q_OS_LINUX
+        if (m_nativeWayland) {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+            if (QWindow *window = windowHandle())
+                window->startSystemMove();
+#endif
+            // The compositor owns the grab and may consume the release.
+            // Do not enter the manual dragging state or save synthetic coords.
+            event->accept();
+            return;
+        }
+#endif
         m_dragging = true;
         m_dragRowCount = qMax(1, m_processes.size());
         m_animation->stop();
@@ -353,7 +393,51 @@ void AlertWindow::applyConfiguration() {
         animateToContentHeight();
 }
 
+bool AlertWindow::supportsPositionRestoration() const {
+#ifdef Q_OS_LINUX
+    return !m_nativeWayland;
+#else
+    return true;
+#endif
+}
+
+#ifdef Q_OS_LINUX
+void AlertWindow::updateWaylandOverlay() {
+    m_animation->stop();
+    if (m_processes.isEmpty()) {
+        // Retain the mapped surface and its geometry so the compositor does
+        // not choose a new position at the next alert. Rows are already hidden.
+        m_animatedHeight = 0;
+        m_settingsButton->hide();
+        if (QWindow *window = windowHandle()) {
+            // An empty QRegion restores the full input region in Qt. Use a
+            // nonempty region entirely outside the surface for click-through.
+            window->setMask(QRegion(QRect(-1, -1, 1, 1)));
+        }
+        update();
+        return;
+    }
+
+    m_settingsButton->show();
+    m_layout->activate();
+    setFixedWidth(contentWidth());
+    setAnimatedHeight(contentHeightForRows(m_processes.size()));
+    positionSettingsButton();
+    if (!isVisible())
+        show();
+    if (QWindow *window = windowHandle())
+        window->setMask(QRegion());
+    update();
+}
+#endif
+
 void AlertWindow::animateToContentHeight() {
+#ifdef Q_OS_LINUX
+    if (m_nativeWayland) {
+        updateWaylandOverlay();
+        return;
+    }
+#endif
     m_layout->activate();
     const int targetHeight = m_processes.isEmpty() ? 0 : contentHeightForRows(m_processes.size());
     const int targetWidth = m_processes.isEmpty() ? width() : contentWidth();
@@ -410,6 +494,8 @@ void AlertWindow::showSettings() {
 }
 
 void AlertWindow::restorePosition() {
+    if (!supportsPositionRestoration())
+        return;
     const QPoint newPos = sanePositionOnPrimaryScreen();
     move(newPos);
     m_config->setWindowPosition(newPos);

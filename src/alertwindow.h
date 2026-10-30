@@ -23,6 +23,7 @@ public:
 
     int animatedHeight() const { return m_animatedHeight; }
     void setAnimatedHeight(int height);
+    bool supportsPositionRestoration() const;
 
 public slots:
     void setBadProcesses(const QVector<BadProcess> &processes);
@@ -40,6 +41,10 @@ protected:
     void resizeEvent(QResizeEvent *event) override;
 
 private:
+#ifdef Q_OS_LINUX
+    void updateWaylandOverlay();
+    bool m_nativeWayland = false;
+#endif
     void applyConfiguration();
     void updateNameAnimation();
     void animateToContentHeight();

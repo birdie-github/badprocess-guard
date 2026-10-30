@@ -231,6 +231,18 @@ Close/Kill actions require Linux 5.3 or later with `pidfd_open` and `pidfd_send_
 
 X11 additionally supports displaying the alert across all virtual workspaces.
 
+On native Wayland, dragging uses the compositor's interactive move operation
+(Qt 5.15 or later). The compositor chooses the initial position; saved absolute
+coordinates and the tray's Restore position action are not supported.
+
+Between alerts, the Wayland overlay remains mapped at its last size and position,
+but is painted fully transparent and has no input area. This avoids a fresh
+placement after each alert and lets clicks pass through while idle. Height
+animations are disabled on this path. Placement is retained within the running
+session, not across application restarts; the compositor still controls window
+placement and stacking. Some compositors may list the invisible window in their
+window switcher. X11 (including XWayland) and Windows retain their existing behavior.
+
 ## Similar tools
 
 BadProcess Guard complements rather than replaces tools such as:

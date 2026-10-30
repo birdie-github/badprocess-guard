@@ -71,6 +71,7 @@ int main(int argc, char **argv) {
     QMenu trayMenu;
     QAction *settingsAction = trayMenu.addAction(QStringLiteral("Settings"));
     QAction *restorePositionAction = trayMenu.addAction(QStringLiteral("Restore position"));
+    restorePositionAction->setEnabled(window.supportsPositionRestoration());
     QAction *exitAction = trayMenu.addAction(QStringLiteral("Exit"));
 
     QSystemTrayIcon trayIcon(QIcon(QStringLiteral(":/icons/gear_metallic.svg")));
