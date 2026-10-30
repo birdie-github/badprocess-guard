@@ -328,8 +328,10 @@ void AlertWindow::mouseReleaseEvent(QMouseEvent *event) {
 
 void AlertWindow::applyConfiguration() {
     const QString textColor = m_config->darkMode() ? QStringLiteral("#f5f5f5") : QStringLiteral("#111111");
-    setStyleSheet(QStringLiteral(
-        "QFrame { background: transparent; }"
+    // The overlay background is painted by paintEvent(). Keep its button
+    // styling local: a stylesheet on this window also reaches Settings and
+    // its QFrame-derived item views and headers through QObject parenting.
+    m_settingsButton->setStyleSheet(QStringLiteral(
         "QToolButton { color: %1; border: 0; background: transparent; font-size: 14px; }"
         "QToolButton:hover { background: rgba(127,127,127,45); border-radius: 5px; }"
     ).arg(textColor));

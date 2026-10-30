@@ -66,7 +66,10 @@ void ProcessEntryWidget::setDarkMode(bool dark) {
     const QString color = dark ? QStringLiteral("#f5f5f5") : QStringLiteral("#111111");
     setNameColor(QColor(color));
     m_text->setStyleSheet(QStringLiteral("QLabel { color: %1; }").arg(color));
-    m_stopButton->setStyleSheet(QStringLiteral("QToolButton { color: %1; border: 0; background: transparent; }").arg(color));
+    m_stopButton->setStyleSheet(QStringLiteral(
+        "QToolButton { color: %1; border: 0; background: transparent; font-size: 14px; }"
+        "QToolButton:hover { background: rgba(127,127,127,45); border-radius: 5px; }"
+    ).arg(color));
 }
 
 void ProcessEntryWidget::setCustomFontEnabled(bool enabled, const QFont &font) {
