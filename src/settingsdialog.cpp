@@ -64,7 +64,7 @@ SettingsDialog::SettingsDialog(Configuration *config, QWidget *parent)
     m_alertDuration->setRange(0, std::numeric_limits<int>::max());
     m_alertDuration->setSingleStep(100);
     m_alertDuration->setSuffix(QStringLiteral(" ms"));
-    m_alertDuration->setToolTip(QStringLiteral("How long a recovered process remains visible before disappearing. Zero disables the hold duration."));
+    m_alertDuration->setToolTip(QStringLiteral("How long a still-running process may remain visible after its last high-CPU sample. Exited processes are removed at the next check. Zero disables the hold duration."));
 
     m_treeThreshold = new QDoubleSpinBox(this);
     m_treeThreshold->setRange(0.0, 1000000.0);

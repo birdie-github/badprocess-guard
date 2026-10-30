@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
                                            QStringLiteral("Individual-process CPU threshold percentage."),
                                            QStringLiteral("percent"), QStringLiteral("50"));
     QCommandLineOption alertDurationOpt(QStringLiteral("alert-duration"),
-                                        QStringLiteral("Milliseconds to keep a disappeared bad process visible after a normal sample."),
+                                        QStringLiteral("Milliseconds to retain a still-running process after its last high-CPU sample; exited processes are removed at the next check."),
                                         QStringLiteral("ms"));
     QCommandLineOption debugOpt(QStringLiteral("debug"),
                                 QStringLiteral("Print monitor/debug information to stderr."));

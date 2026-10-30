@@ -134,7 +134,7 @@ void ProcessMonitor::sampleInternal(bool honorLinger) {
     const double elapsed = qMax(0.001, double(nowNs - m_previousNs) / 1000000000.0);
 
     const QVector<BadProcess> currentBad = measureBadProcesses(m_previous, current, elapsed);
-    const QVector<BadProcess> bad = filterIgnored(applyLinger(currentBad, nowMs, honorLinger), current);
+    const QVector<BadProcess> bad = filterIgnored(applyLinger(currentBad, current, nowMs, honorLinger), current);
     QSet<ProcessIdentity> visible;
     for (const BadProcess &process : bad)
         visible.insert(process.root);
@@ -245,7 +245,8 @@ qint64 ProcessMonitor::monotonicMs() const {
     return m_clock.isValid() ? m_clock.nsecsElapsed() / 1000000LL : 0;
 }
 
-QVector<BadProcess> ProcessMonitor::applyLinger(const QVector<BadProcess> &current, qint64 nowMs, bool honorLinger) {
+QVector<BadProcess> ProcessMonitor::applyLinger(const QVector<BadProcess> &current, const Snapshot &snapshot,
+                                             qint64 nowMs, bool honorLinger) {
     QSet<ProcessIdentity> present;
     QVector<BadProcess> result;
 
@@ -264,6 +265,17 @@ QVector<BadProcess> ProcessMonitor::applyLinger(const QVector<BadProcess> &curre
 
         const qint64 lastSeen = m_recentLastSeenMs.value(id, 0);
         if (honorLinger && m_lingerMs > 0 && nowMs - lastSeen < m_lingerMs) {
+            // The hold is for live processes that recovered, not a history of
+            // exited compiler jobs. Reuse this scan's identity/state whenever
+            // possible; a missing entry alone could be a transient read error.
+            const auto sampled = snapshot.constFind(id.pid);
+            const bool exited = sampled != snapshot.constEnd()
+                ? !(sampled->id == id) || sampled->exited
+                : runState(id) == RunState::Ended;
+            if (exited) {
+                toRemove.append(id);
+                continue;
+            }
             BadProcess lingering = it.value();
             lingering.active = false;
             result.append(lingering);
@@ -319,6 +331,7 @@ ProcessMonitor::Snapshot ProcessMonitor::readSnapshot() const {
                 continue;
             }
             info.sampledNs = m_clock.nsecsElapsed();
+            info.exited = exitTime.dwLowDateTime != 0 || exitTime.dwHighDateTime != 0;
 
             ULARGE_INTEGER ct, kt, ut;
             ct.LowPart = creationTime.dwLowDateTime;
@@ -417,6 +430,8 @@ bool ProcessMonitor::readProc(int pid, ProcInfo *info) {
     info->id = {pid, start};
     info->ppid = ppid;
     info->cpuTicks = utime + stime;
+    info->exited = rest.at(0) == QLatin1String("Z") || rest.at(0) == QLatin1String("X") ||
+                   rest.at(0) == QLatin1String("x");
     info->comm = comm;
     info->argv = argv;
     return true;
@@ -650,6 +665,8 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
     };
 
     for (const ProcInfo &root : after) {
+        if (root.exited)
+            continue;
         const QString base = basenameOfArgv0(root);
 
         const QString label = rootLabelForBase(base);
@@ -721,7 +738,7 @@ QVector<BadProcess> ProcessMonitor::measureLeaves(const Snapshot &before, const 
 
     QVector<BadProcess> bad;
     for (const ProcInfo &process : after) {
-        if (suppressedMembers.contains(process.id))
+        if (process.exited || suppressedMembers.contains(process.id))
             continue;
 
         const auto beforeIt = beforeById.constFind(process.id);
@@ -798,7 +815,7 @@ ProcessMonitor::RunState ProcessMonitor::runState(const ProcessIdentity &id) {
     const quint64 start = fields.at(19).toULongLong(&ok);
     if (!ok)
         return RunState::Unknown;
-    return start == id.startTime && fields.first() != "Z" && fields.first() != "X"
+    return start == id.startTime && fields.first() != "Z" && fields.first() != "X" && fields.first() != "x"
         ? RunState::Running : RunState::Ended;
 #endif
 }

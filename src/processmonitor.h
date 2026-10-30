@@ -70,6 +70,7 @@ private:
         ProcessIdentity id;
         int ppid = -1;
         quint64 cpuTicks = 0;
+        bool exited = false;
 #ifdef Q_OS_WIN
         qint64 sampledNs = 0;
 #endif
@@ -116,7 +117,8 @@ private:
     static QSet<int> collectTreePids(int rootPid, const QHash<int, QVector<int>> &children);
     QVector<BadProcess> measureBadProcesses(const Snapshot &before, const Snapshot &after, double elapsedSeconds);
     double processCpuPercent(const ProcInfo &before, const ProcInfo &after, double elapsedSeconds) const;
-    QVector<BadProcess> applyLinger(const QVector<BadProcess> &current, qint64 nowMs, bool honorLinger);
+    QVector<BadProcess> applyLinger(const QVector<BadProcess> &current, const Snapshot &snapshot,
+                                  qint64 nowMs, bool honorLinger);
     void sampleInternal(bool honorLinger);
     void emitIfChanged(const QVector<BadProcess> &bad);
     void scheduleExpiryTimer(qint64 nowMs);

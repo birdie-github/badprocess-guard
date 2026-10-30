@@ -67,7 +67,7 @@ Every CPU sample represents the current system state.
 
 When a configured process tree or an individual process exceeds its CPU threshold, BadProcess Guard displays a compact frameless desktop alert.
 
-When CPU usage returns below the threshold, the alert disappears after the configured alert duration.
+When CPU usage returns below the threshold, a still-running process can remain visible until the configured alert duration has elapsed since its last high-CPU sample. Once a process exits, its alert is removed at the next monitoring check instead of being held for the remaining duration. This prevents successive batches of short-lived compiler processes from accumulating as stale alerts during parallel builds.
 
 The alert intentionally contains only the essential information:
 
