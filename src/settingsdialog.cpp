@@ -101,10 +101,14 @@ SettingsDialog::SettingsDialog(Configuration *config, QWidget *parent)
     if (runningOnX11)
         form->addRow(QString(), m_allWorkspaces);
 
-    auto *closeButton = new QPushButton(QStringLiteral("Close"), this);
+    auto *exitButton = new QPushButton(QStringLiteral("Exit"), this);
+    exitButton->setAutoDefault(false);
+    auto *saveButton = new QPushButton(QStringLiteral("Save"), this);
+    saveButton->setDefault(true);
     auto *buttons = new QHBoxLayout;
+    buttons->addWidget(exitButton);
     buttons->addStretch(1);
-    buttons->addWidget(closeButton);
+    buttons->addWidget(saveButton);
 
     auto *tabs = new QTabWidget(this);
     auto *general = new QWidget(tabs);
@@ -184,7 +188,12 @@ SettingsDialog::SettingsDialog(Configuration *config, QWidget *parent)
         if (ok)
             m_config->setCustomFont(font);
     });
-    connect(closeButton, &QPushButton::clicked, this, &QDialog::accept);
+    connect(saveButton, &QPushButton::clicked, this, &QDialog::accept);
+    connect(exitButton, &QPushButton::clicked, this, [this] {
+        // Finish the dialog's deferred save before exiting the event loop.
+        accept();
+        QApplication::quit();
+    });
 }
 
 void SettingsDialog::refreshFromConfig() {
