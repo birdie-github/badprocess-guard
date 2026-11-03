@@ -460,11 +460,45 @@ QString ProcessMonitor::basenameOfArgv0(const ProcInfo &info) {
         }
 
         // argv[0] may contain a real path with spaces or a rewritten process
-        // title. Prefer the kernel's executable name when available; never
-        // guess an argument boundary from whitespace. Wine paths above keep
-        // their Windows executable name instead of the Wine loader's name.
+        // title. Prefer the kernel's executable name when available; Wine
+        // paths above keep their Windows executable name instead of the Wine
+        // loader's name.
         if (!info.executableName.isEmpty())
             return info.executableName;
+
+#ifndef Q_OS_WIN
+        const QString trimmed = argv0.trimmed();
+        for (int i = 0; i < trimmed.size(); ++i) {
+            if (trimmed.at(i).isSpace()) {
+                // /proc/<pid>/exe can be unreadable across user boundaries.
+                // Match an existing file path before falling back to the first
+                // whitespace-delimited token so options containing '/' (e.g.
+                // --app-path=/path/to/app.asar) are not mistaken for the
+                // executable path.
+                int pos = 0;
+                while (true) {
+                    int space = -1;
+                    for (int j = pos; j < trimmed.size(); ++j) {
+                        if (trimmed.at(j).isSpace()) {
+                            space = j;
+                            break;
+                        }
+                    }
+                    const QString candidate = space < 0 ? trimmed : trimmed.left(space);
+                    const QFileInfo candidateInfo(candidate);
+                    if (candidateInfo.exists() && !candidateInfo.isDir())
+                        return candidateInfo.fileName();
+                    if (space < 0)
+                        break;
+                    pos = space + 1;
+                    while (pos < trimmed.size() && trimmed.at(pos).isSpace())
+                        ++pos;
+                }
+
+                return QFileInfo(trimmed.left(i)).fileName();
+            }
+        }
+#endif
 
         return QFileInfo(argv0).fileName();
     }
