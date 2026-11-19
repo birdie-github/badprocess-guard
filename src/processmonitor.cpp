@@ -658,10 +658,6 @@ QVector<BadProcess> ProcessMonitor::measureBadProcesses(const Snapshot &before, 
 QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const Snapshot &after, double elapsedSeconds,
                                                  QSet<ProcessIdentity> *badTreeMembers,
                                                  QSet<ProcessIdentity> *treeRootsSeen) const {
-    QHash<ProcessIdentity, ProcInfo> beforeById;
-    for (const ProcInfo &info : before)
-        beforeById.insert(info.id, info);
-
     const QHash<int, QVector<int>> children = buildChildren(after);
     QVector<BadProcess> bad;
 
@@ -724,8 +720,8 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
             const auto afterIt = after.constFind(pid);
             if (afterIt == after.constEnd())
                 continue;
-            const auto beforeIt = beforeById.constFind(afterIt->id);
-            if (beforeIt == beforeById.constEnd())
+            const auto beforeIt = before.constFind(pid);
+            if (beforeIt == before.constEnd() || !(beforeIt->id == afterIt->id))
                 continue;
             percent += processCpuPercent(*beforeIt, *afterIt, elapsedSeconds);
             members.insert(afterIt->id);
@@ -766,17 +762,13 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
 }
 
 QVector<BadProcess> ProcessMonitor::measureLeaves(const Snapshot &before, const Snapshot &after, double elapsedSeconds, const QSet<ProcessIdentity> &suppressedMembers) const {
-    QHash<ProcessIdentity, ProcInfo> beforeById;
-    for (const ProcInfo &info : before)
-        beforeById.insert(info.id, info);
-
     QVector<BadProcess> bad;
     for (const ProcInfo &process : after) {
         if (process.exited || suppressedMembers.contains(process.id))
             continue;
 
-        const auto beforeIt = beforeById.constFind(process.id);
-        if (beforeIt == beforeById.constEnd())
+        const auto beforeIt = before.constFind(process.id.pid);
+        if (beforeIt == before.constEnd() || !(beforeIt->id == process.id))
             continue;
 
         const double percent = processCpuPercent(*beforeIt, process, elapsedSeconds);
