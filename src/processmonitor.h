@@ -131,6 +131,7 @@ private:
     void sampleInternal(bool honorLinger);
     void emitIfChanged(const QVector<BadProcess> &bad);
     void scheduleExpiryTimer(qint64 nowMs);
+    int minimumSampleDelayMs() const;
     qint64 monotonicMs() const;
     QVector<BadProcess> measureTrees(const Snapshot &before, const Snapshot &after, double elapsedSeconds,
                                      QSet<ProcessIdentity> *badTreeMembers,
@@ -144,7 +145,9 @@ private:
     QElapsedTimer m_clock;
     Snapshot m_previous;
     qint64 m_previousNs = 0;
-#ifndef Q_OS_WIN
+#ifdef Q_OS_WIN
+    bool m_immediateRefreshPending = false;
+#else
     std::optional<quint64> m_previousBootTicks;
 #endif
     double m_cpuUnitsPerSecond = 100.0;

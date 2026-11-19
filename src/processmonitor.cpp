@@ -154,12 +154,16 @@ void ProcessMonitor::sampleInternal(bool honorLinger) {
     // Periodic, expiry and explicit refreshes can arrive together. Avoid
     // measuring Windows CPU accounting over a tiny interval or scanning twice
     // in succession. The expiry timer also delivers any deferred refresh.
-    if (!m_previous.isEmpty()) {
-        const qint64 remainingNs = 125000000LL - (m_clock.nsecsElapsed() - m_previousNs);
-        if (remainingNs > 0) {
-            m_expiryTimer.start(int((remainingNs + 999999LL) / 1000000LL));
-            return;
-        }
+    const int delayMs = minimumSampleDelayMs();
+    if (delayMs > 0) {
+        if (!honorLinger)
+            m_immediateRefreshPending = true;
+        m_expiryTimer.start(delayMs);
+        return;
+    }
+    if (m_immediateRefreshPending) {
+        honorLinger = false;
+        m_immediateRefreshPending = false;
     }
 #endif
 
@@ -226,27 +230,25 @@ void ProcessMonitor::sampleInternal(bool honorLinger) {
 }
 
 void ProcessMonitor::expireLinger() {
-#ifdef Q_OS_WIN
-    // A linger timeout only tells us that the last bad sample is old enough;
-    // it does not tell us that the process has recovered.  Refresh now so a
-    // continuously hot process stays visible instead of disappearing until
-    // the next periodic sample.  Linger is bypassed because its timeout has
-    // already elapsed.
-    sampleInternal(false);
-#else
+#ifndef Q_OS_WIN
     // Expiry is not evidence of recovery. Recheck CPU usage, but avoid a
     // tiny measurement window if the periodic timer has just sampled.
-    if (!m_previous.isEmpty()) {
-        const qint64 remainingNs = 125000000LL - (m_clock.nsecsElapsed() - m_previousNs);
-        if (remainingNs > 0) {
-            m_expiryTimer.start(int((remainingNs + 999999LL) / 1000000LL));
-            return;
-        }
+    const int delayMs = minimumSampleDelayMs();
+    if (delayMs > 0) {
+        m_expiryTimer.start(delayMs);
+        return;
     }
+#endif
     // Keep each recovered entry until its own deadline, while refreshing
     // continuously busy entries from the new sample.
     sampleInternal(true);
-#endif
+}
+
+int ProcessMonitor::minimumSampleDelayMs() const {
+    if (m_previous.isEmpty())
+        return 0;
+    const qint64 remainingNs = 125000000LL - (m_clock.nsecsElapsed() - m_previousNs);
+    return remainingNs > 0 ? int((remainingNs + 999999LL) / 1000000LL) : 0;
 }
 
 void ProcessMonitor::emitIfChanged(const QVector<BadProcess> &bad) {
@@ -277,6 +279,14 @@ void ProcessMonitor::emitIfChanged(const QVector<BadProcess> &bad) {
 
 void ProcessMonitor::scheduleExpiryTimer(qint64 nowMs) {
     m_expiryTimer.stop();
+
+#ifdef Q_OS_WIN
+    // Alert edits and duration changes can also reschedule this timer.
+    if (m_immediateRefreshPending) {
+        m_expiryTimer.start(minimumSampleDelayMs());
+        return;
+    }
+#endif
 
     if (m_lingerMs <= 0 || m_recentLastSeenMs.isEmpty())
         return;
