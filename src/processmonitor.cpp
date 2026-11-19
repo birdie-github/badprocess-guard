@@ -25,7 +25,9 @@
 #else
 #include <unistd.h>
 #include <cerrno>
+#include <charconv>
 #include <fcntl.h>
+#include <string_view>
 #endif
 
 static double cpuPercent(quint64 beforeUnits, quint64 afterUnits, double elapsedSeconds, double unitsPerSecond) {
@@ -359,11 +361,11 @@ ProcessMonitor::Snapshot ProcessMonitor::readSnapshot() const {
     CloseHandle(snapshot);
 #else
     const QDir proc(QStringLiteral("/proc"));
-    const QFileInfoList entries = proc.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+    const QStringList entries = proc.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Unsorted);
 
-    for (const QFileInfo &entry : entries) {
+    for (const QString &entry : entries) {
         bool ok = false;
-        const int pid = entry.fileName().toInt(&ok);
+        const int pid = entry.toInt(&ok);
         if (!ok)
             continue;
         ProcInfo info;
@@ -383,27 +385,44 @@ bool ProcessMonitor::readProc(int pid, ProcInfo *info) {
     QFile statFile(QStringLiteral("/proc/%1/stat").arg(pid));
     if (!statFile.open(QIODevice::ReadOnly | QIODevice::Text))
         return false;
-    const QString stat = QString::fromUtf8(statFile.readAll());
-    const int open = stat.indexOf(QLatin1Char('('));
-    const int close = stat.lastIndexOf(QLatin1Char(')'));
+    const QByteArray stat = statFile.readAll();
+    const auto open = stat.indexOf('(');
+    // comm can itself contain spaces and closing parentheses.
+    const auto close = stat.lastIndexOf(')');
     if (open < 0 || close <= open)
         return false;
 
-    const QString comm = stat.mid(open + 1, close - open - 1);
-#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
-    const QStringList rest = stat.mid(close + 2).split(QLatin1Char(' '), Qt::SkipEmptyParts);
-#else
-    const QStringList rest = stat.mid(close + 2).split(QLatin1Char(' '), QString::SkipEmptyParts);
-#endif
-    if (rest.size() <= 19)
-        return false;
+    const char *cursor = stat.constData() + close + 1;
+    const char *const end = stat.constData() + stat.size();
+    int field = 2; // comm
+    const auto readField = [&](int requested) -> std::string_view {
+        const char *begin = cursor;
+        while (field < requested) {
+            while (cursor != end && *cursor == ' ')
+                ++cursor;
+            begin = cursor;
+            while (cursor != end && *cursor != ' ' && *cursor != '\n')
+                ++cursor;
+            if (begin == cursor)
+                return {};
+            ++field;
+        }
+        return {begin, static_cast<std::size_t>(cursor - begin)};
+    };
+    const auto readNumber = [&](int requested, auto &value) {
+        const std::string_view token = readField(requested);
+        if (token.empty())
+            return false;
+        const char *const tokenEnd = token.data() + token.size();
+        const auto parsed = std::from_chars(token.data(), tokenEnd, value);
+        return parsed.ec == std::errc{} && parsed.ptr == tokenEnd;
+    };
 
-    bool okPpid = false, okUtime = false, okStime = false, okStart = false;
-    const int ppid = rest.at(1).toInt(&okPpid);
-    const quint64 utime = rest.at(11).toULongLong(&okUtime);
-    const quint64 stime = rest.at(12).toULongLong(&okStime);
-    const quint64 start = rest.at(19).toULongLong(&okStart);
-    if (!okPpid || !okUtime || !okStime || !okStart)
+    const std::string_view state = readField(3);
+    int ppid = 0;
+    quint64 utime = 0, stime = 0, start = 0;
+    if (state.size() != 1 || !readNumber(4, ppid) || !readNumber(14, utime) ||
+        !readNumber(15, stime) || !readNumber(22, start))
         return false;
 
     QFile cmdFile(QStringLiteral("/proc/%1/cmdline").arg(pid));
@@ -430,9 +449,8 @@ bool ProcessMonitor::readProc(int pid, ProcInfo *info) {
     info->id = {pid, start};
     info->ppid = ppid;
     info->cpuTicks = utime + stime;
-    info->exited = rest.at(0) == QLatin1String("Z") || rest.at(0) == QLatin1String("X") ||
-                   rest.at(0) == QLatin1String("x");
-    info->comm = comm;
+    info->exited = state.front() == 'Z' || state.front() == 'X' || state.front() == 'x';
+    info->comm = QString::fromUtf8(stat.constData() + open + 1, close - open - 1);
     info->argv = argv;
     return true;
 #endif
