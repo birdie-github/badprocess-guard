@@ -109,7 +109,7 @@ private:
     static bool readProc(int pid, ProcInfo *info);
     static QString basenameOfArgv0(const ProcInfo &info);
     static QString commandOf(const ProcInfo &info);
-    QString displayNameFor(const ProcInfo &info) const;
+    QString displayNameFor(const ProcInfo &info, const QString &command) const;
     void loadProcessMapping();
     void loadProcessMappingFile(const QString &path, bool *loaded);
     QStringList processMappingSearchPaths() const;

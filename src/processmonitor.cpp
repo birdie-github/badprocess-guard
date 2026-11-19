@@ -30,6 +30,36 @@
 #include <string_view>
 #endif
 
+#ifdef Q_OS_WIN
+static HANDLE openProcessForQuery(DWORD pid) {
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    return process ? process : OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
+}
+
+static QString processImagePath(const ProcessIdentity &id) {
+    const HANDLE process = openProcessForQuery(DWORD(id.pid));
+    if (!process)
+        return {};
+
+    QString path;
+    FILETIME creationTime, exitTime, kernelTime, userTime;
+    if (GetProcessTimes(process, &creationTime, &exitTime, &kernelTime, &userTime)) {
+        ULARGE_INTEGER creation;
+        creation.LowPart = creationTime.dwLowDateTime;
+        creation.HighPart = creationTime.dwHighDateTime;
+        // The PID may have been reused since the CPU snapshot.
+        if (creation.QuadPart == id.startTime) {
+            wchar_t imagePath[32768];
+            DWORD length = DWORD(sizeof(imagePath) / sizeof(imagePath[0]));
+            if (QueryFullProcessImageNameW(process, 0, imagePath, &length) && length > 0)
+                path = QString::fromWCharArray(imagePath, int(length));
+        }
+    }
+    CloseHandle(process);
+    return path;
+}
+#endif
+
 static double cpuPercent(quint64 beforeUnits, quint64 afterUnits, double elapsedSeconds, double unitsPerSecond) {
     if (afterUnits <= beforeUnits || elapsedSeconds <= 0.0 || unitsPerSecond <= 0.0)
         return 0.0;
@@ -318,12 +348,8 @@ ProcessMonitor::Snapshot ProcessMonitor::readSnapshot() const {
             info.id.pid = pid;
             info.ppid = static_cast<int>(entry.th32ParentProcessID);
             info.comm = QString::fromWCharArray(entry.szExeFile);
-            info.argv << info.comm;
 
-            HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
-            if (!process) {
-                process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, entry.th32ProcessID);
-            }
+            const HANDLE process = openProcessForQuery(entry.th32ProcessID);
             if (!process)
                 continue;
 
@@ -342,13 +368,6 @@ ProcessMonitor::Snapshot ProcessMonitor::readSnapshot() const {
             kt.HighPart = kernelTime.dwHighDateTime;
             ut.LowPart = userTime.dwLowDateTime;
             ut.HighPart = userTime.dwHighDateTime;
-
-            wchar_t imagePath[32768];
-            DWORD pathLen = DWORD(sizeof(imagePath) / sizeof(imagePath[0]));
-            if (QueryFullProcessImageNameW(process, 0, imagePath, &pathLen) && pathLen > 0) {
-                info.argv.clear();
-                info.argv << QString::fromWCharArray(imagePath, int(pathLen));
-            }
 
             CloseHandle(process);
 
@@ -600,13 +619,16 @@ void ProcessMonitor::loadProcessMappingFile(const QString &path, bool *loaded) {
     *loaded = !m_mapping.treeRoots.isEmpty() || !m_mapping.exactNames.isEmpty() || !m_mapping.containsNames.isEmpty();
 }
 
-QString ProcessMonitor::displayNameFor(const ProcInfo &info) const {
+QString ProcessMonitor::displayNameFor(const ProcInfo &info, const QString &command) const {
+#ifdef Q_OS_WIN
+    const QString base = QFileInfo(command).fileName();
+#else
     const QString base = basenameOfArgv0(info);
+#endif
     const auto exactIt = m_mapping.exactNames.constFind(base);
     if (exactIt != m_mapping.exactNames.constEnd())
         return exactIt.value();
 
-    const QString command = commandOf(info);
     for (const auto &rule : m_mapping.containsNames) {
         if (command.contains(rule.first))
             return rule.second;
@@ -752,15 +774,6 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
         if (treeRootsSeen)
             treeRootsSeen->insert(root.id);
 
-        if (m_debug) {
-            qInfo().noquote() << QStringLiteral("badprocess-guard: tree root %1 pid=%2 cpu=%3% counted=%4 command=%5")
-                                 .arg(label)
-                                 .arg(root.id.pid)
-                                 .arg(percent, 0, 'f', 1)
-                                 .arg(counted)
-                                 .arg(commandOf(root));
-        }
-
         // Suppress generic per-process alerts for members of configured
         // process trees even when the tree itself is below the tree threshold.
         // Known multi-process applications should be represented by their
@@ -768,12 +781,27 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
         for (const ProcessIdentity &member : members)
             badTreeMembers->insert(member);
 
-        if (percent >= m_treeThresholdPercent) {
-            BadProcess process{label, root.id, commandOf(root), percent, counted};
-            process.tree = true;
-            describeApplication(&process, root);
-            bad.append(process);
+        const bool shouldAlert = percent >= m_treeThresholdPercent;
+        if (!shouldAlert && !m_debug)
+            continue;
+
+        BadProcess alert{label, root.id, commandOf(root), percent, counted};
+        if (shouldAlert) {
+            alert.tree = true;
+            describeApplication(&alert, root);
         }
+
+        if (m_debug) {
+            qInfo().noquote() << QStringLiteral("badprocess-guard: tree root %1 pid=%2 cpu=%3% counted=%4 command=%5")
+                                 .arg(label)
+                                 .arg(root.id.pid)
+                                 .arg(percent, 0, 'f', 1)
+                                 .arg(counted)
+                                 .arg(alert.command);
+        }
+
+        if (shouldAlert)
+            bad.append(alert);
     }
 
     return bad;
@@ -793,16 +821,16 @@ QVector<BadProcess> ProcessMonitor::measureLeaves(const Snapshot &before, const 
         if (percent < m_processThresholdPercent)
             continue;
 
-        const QString label = displayNameFor(process);
+        BadProcess alert{QString(), process.id, commandOf(process), percent, 1};
+        describeApplication(&alert, process);
+        alert.label = displayNameFor(process, alert.command);
         if (m_debug) {
             qInfo().noquote() << QStringLiteral("badprocess-guard: process %1 pid=%2 cpu=%3% command=%4")
-                                 .arg(label)
+                                 .arg(alert.label)
                                  .arg(process.id.pid)
                                  .arg(percent, 0, 'f', 1)
-                                 .arg(commandOf(process));
+                                 .arg(alert.command);
         }
-        BadProcess alert{label, process.id, commandOf(process), percent, 1};
-        describeApplication(&alert, process);
         bad.append(alert);
     }
     return bad;
@@ -868,10 +896,7 @@ ProcessMonitor::ApplicationIdentity ProcessMonitor::applicationIdentity(const Pr
     ApplicationIdentity result;
     result.error = QStringLiteral("The executable path could not be verified. You can still ignore this run.");
 #ifdef Q_OS_WIN
-    // argv[0] comes from QueryFullProcessImageNameW, not the command line.
-    if (info.argv.isEmpty())
-        return result;
-    const QString path = QDir::fromNativeSeparators(info.argv.first());
+    const QString path = QDir::fromNativeSeparators(processImagePath(info.id));
     if (!QDir::isAbsolutePath(path))
         return result;
     result.path = QDir::cleanPath(path);
@@ -951,6 +976,10 @@ void ProcessMonitor::describeApplication(BadProcess *process, const ProcInfo &in
     process->applicationKey = application.key;
     process->executablePath = application.path;
     process->ignoreUnavailableReason = application.error;
+#ifdef Q_OS_WIN
+    if (!application.path.isEmpty())
+        process->command = QDir::toNativeSeparators(application.path);
+#endif
 }
 
 QString ProcessMonitor::ignoreProcess(const BadProcess &process, bool permanent) {
