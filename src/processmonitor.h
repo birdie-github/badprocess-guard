@@ -106,7 +106,11 @@ private:
     QVector<BadProcess> filterIgnored(const QVector<BadProcess> &bad, const Snapshot &snapshot) const;
     void ignoredApplicationsChanged();
     Snapshot readSnapshot() const;
+#ifndef Q_OS_WIN
+    bool couldReachCpuThreshold(const Snapshot &current, double elapsedSeconds) const;
     static bool readProc(int pid, ProcInfo *info);
+    static void readProcCommand(ProcInfo *info);
+#endif
     static QString basenameOfArgv0(const ProcInfo &info);
     static QString commandOf(const ProcInfo &info);
     QString displayNameFor(const ProcInfo &info, const QString &command) const;

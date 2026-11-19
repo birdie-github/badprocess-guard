@@ -160,10 +160,23 @@ void ProcessMonitor::sampleInternal(bool honorLinger) {
 #endif
 
     pruneIgnoreRules();
-    const Snapshot current = readSnapshot();
+    Snapshot current = readSnapshot();
     const qint64 nowNs = m_clock.nsecsElapsed();
-    const qint64 nowMs = nowNs / 1000000LL;
     const double elapsed = qMax(0.001, double(nowNs - m_previousNs) / 1000000000.0);
+
+#ifndef Q_OS_WIN
+    if (!m_debug && m_lastEmitted.isEmpty() && m_recentProcesses.isEmpty() &&
+        !couldReachCpuThreshold(current, elapsed)) {
+        m_previous = current;
+        m_previousNs = nowNs;
+        return;
+    }
+    for (ProcInfo &info : current)
+        readProcCommand(&info);
+    const qint64 nowMs = monotonicMs();
+#else
+    const qint64 nowMs = nowNs / 1000000LL;
+#endif
 
     const QVector<BadProcess> currentBad = measureBadProcesses(m_previous, current, elapsed);
     const QVector<BadProcess> bad = filterIgnored(applyLinger(currentBad, current, nowMs, honorLinger), current);
@@ -395,12 +408,29 @@ ProcessMonitor::Snapshot ProcessMonitor::readSnapshot() const {
     return result;
 }
 
+#ifndef Q_OS_WIN
+bool ProcessMonitor::couldReachCpuThreshold(const Snapshot &current, double elapsedSeconds) const {
+    const double threshold = qMin(m_treeThresholdPercent, m_processThresholdPercent);
+    if (threshold <= 0.0)
+        return true;
+
+    // Count every matching run, including exited tree members. The sum
+    // bounds any single process or tree before we know the tree mappings.
+    quint64 ticks = 0;
+    for (const ProcInfo &info : current) {
+        const auto before = m_previous.constFind(info.id.pid);
+        if (before == m_previous.constEnd() || !(before->id == info.id) || info.cpuTicks <= before->cpuTicks)
+            continue;
+        const quint64 delta = info.cpuTicks - before->cpuTicks;
+        if (delta >= std::numeric_limits<quint64>::max() - ticks)
+            return true;
+        ticks += delta;
+    }
+    // Leave one tick of headroom for rounding when tree percentages are summed.
+    return cpuPercent(0, ticks + 1, elapsedSeconds, m_cpuUnitsPerSecond) >= threshold;
+}
+
 bool ProcessMonitor::readProc(int pid, ProcInfo *info) {
-#ifdef Q_OS_WIN
-    Q_UNUSED(pid)
-    Q_UNUSED(info)
-    return false;
-#else
     QFile statFile(QStringLiteral("/proc/%1/stat").arg(pid));
     if (!statFile.open(QIODevice::ReadOnly | QIODevice::Text))
         return false;
@@ -444,36 +474,47 @@ bool ProcessMonitor::readProc(int pid, ProcInfo *info) {
         !readNumber(15, stime) || !readNumber(22, start))
         return false;
 
-    QFile cmdFile(QStringLiteral("/proc/%1/cmdline").arg(pid));
-    QStringList argv;
-    if (cmdFile.open(QIODevice::ReadOnly)) {
-        const QByteArray raw = cmdFile.readAll();
-        const QList<QByteArray> parts = raw.split('\0');
-        for (const QByteArray &part : parts) {
-            if (!part.isEmpty())
-                argv << QString::fromLocal8Bit(part);
-        }
-    }
-
-    if (!argv.isEmpty()) {
-        for (const QChar character : argv.first()) {
-            if (character.isSpace()) {
-                const QString executable = QFileInfo(QStringLiteral("/proc/%1/exe").arg(pid)).symLinkTarget();
-                info->executableName = QFileInfo(executable).fileName();
-                break;
-            }
-        }
-    }
-
     info->id = {pid, start};
     info->ppid = ppid;
     info->cpuTicks = utime + stime;
     info->exited = state.front() == 'Z' || state.front() == 'X' || state.front() == 'x';
     info->comm = QString::fromUtf8(stat.constData() + open + 1, close - open - 1);
-    info->argv = argv;
     return true;
-#endif
 }
+
+void ProcessMonitor::readProcCommand(ProcInfo *info) {
+    const int pid = info->id.pid;
+    QFile cmdFile(QStringLiteral("/proc/%1/cmdline").arg(pid));
+    if (!cmdFile.open(QIODevice::ReadOnly))
+        return;
+
+    const QByteArray raw = cmdFile.readAll();
+    cmdFile.close();
+    QStringList argv;
+    const QList<QByteArray> parts = raw.split('\0');
+    for (const QByteArray &part : parts) {
+        if (!part.isEmpty())
+            argv << QString::fromLocal8Bit(part);
+    }
+    if (argv.isEmpty())
+        return;
+
+    QString executableName;
+    for (const QChar character : argv.first()) {
+        if (character.isSpace()) {
+            const QString executable = QFileInfo(QStringLiteral("/proc/%1/exe").arg(pid)).symLinkTarget();
+            executableName = QFileInfo(executable).fileName();
+            break;
+        }
+    }
+
+    // The PID may have been reused between the stat and command reads.
+    if (runState(info->id) == RunState::Running) {
+        info->executableName = executableName;
+        info->argv = argv;
+    }
+}
+#endif
 
 QString ProcessMonitor::basenameOfArgv0(const ProcInfo &info) {
     if (!info.argv.isEmpty()) {
