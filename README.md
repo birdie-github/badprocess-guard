@@ -49,7 +49,7 @@ CPU percentages use the same semantics on Windows and Linux:
 
 This makes it possible to detect applications that heavily load one or several CPU cores even on modern multi-core systems.
 
-On Linux, BadProcess Guard reads CPU accounting information from `/proc`.
+On Linux, BadProcess Guard reads CPU accounting information from `/proc`. A process that started after the previous sample can contribute CPU time on its first appearance. That time is averaged over the full sampling interval. Processes that start and disappear between samples can still be missed.
 
 On Windows, it uses native Win32 process enumeration and process-time APIs.
 

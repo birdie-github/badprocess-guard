@@ -28,6 +28,7 @@
 #include <charconv>
 #include <fcntl.h>
 #include <string_view>
+#include <time.h>
 #endif
 
 #ifdef Q_OS_WIN
@@ -99,6 +100,9 @@ void ProcessMonitor::start() {
     pruneIgnoreRules();
     m_previous = readSnapshot();
     m_previousNs = m_clock.nsecsElapsed();
+#ifndef Q_OS_WIN
+    m_previousBootTicks = bootTicks();
+#endif
     if (m_debug) {
         qInfo().noquote() << QStringLiteral("badprocess-guard: initial snapshot: %1 processes, interval=%2 ms, tree-threshold=%3%, process-threshold=%4%, tree-roots=%5, exact-mappings=%6, contains-mappings=%7")
                              .arg(m_previous.size())
@@ -165,10 +169,12 @@ void ProcessMonitor::sampleInternal(bool honorLinger) {
     const double elapsed = qMax(0.001, double(nowNs - m_previousNs) / 1000000000.0);
 
 #ifndef Q_OS_WIN
+    const auto nowBootTicks = bootTicks();
     if (!m_debug && m_lastEmitted.isEmpty() && m_recentProcesses.isEmpty() &&
         !couldReachCpuThreshold(current, elapsed)) {
         m_previous = current;
         m_previousNs = nowNs;
+        m_previousBootTicks = nowBootTicks;
         return;
     }
     for (ProcInfo &info : current)
@@ -214,6 +220,9 @@ void ProcessMonitor::sampleInternal(bool honorLinger) {
 
     m_previous = current;
     m_previousNs = nowNs;
+#ifndef Q_OS_WIN
+    m_previousBootTicks = nowBootTicks;
+#endif
 }
 
 void ProcessMonitor::expireLinger() {
@@ -421,19 +430,40 @@ ProcessMonitor::Snapshot ProcessMonitor::readSnapshot() const {
 }
 
 #ifndef Q_OS_WIN
+std::optional<quint64> ProcessMonitor::bootTicks() const {
+#ifdef CLOCK_BOOTTIME
+    // /proc starttime uses boot time, including time spent suspended.
+    struct timespec now{};
+    if (clock_gettime(CLOCK_BOOTTIME, &now) == 0 && now.tv_sec >= 0) {
+        const auto rate = quint64(m_cpuUnitsPerSecond);
+        return quint64(now.tv_sec) * rate + quint64(now.tv_nsec) * rate / 1000000000ULL;
+    }
+#endif
+    return std::nullopt;
+}
+
+std::optional<quint64> ProcessMonitor::linuxCpuDelta(const Snapshot &before, const ProcInfo &after) const {
+    const auto previous = before.constFind(after.id.pid);
+    if (previous != before.constEnd() && previous->id == after.id)
+        return after.cpuTicks > previous->cpuTicks ? after.cpuTicks - previous->cpuTicks : 0;
+
+    // Start times only have tick precision. A start in the boundary tick
+    // might predate the previous snapshot, so wait for a matching sample.
+    if (m_previousBootTicks && after.id.startTime > *m_previousBootTicks)
+        return after.cpuTicks;
+    return std::nullopt;
+}
+
 bool ProcessMonitor::couldReachCpuThreshold(const Snapshot &current, double elapsedSeconds) const {
     const double threshold = qMin(m_treeThresholdPercent, m_processThresholdPercent);
     if (threshold <= 0.0)
         return true;
 
-    // Count every matching run, including exited tree members. The sum
-    // bounds any single process or tree before we know the tree mappings.
+    // Use the same CPU deltas as alert measurement, including exited tree
+    // members. The sum bounds any process or tree before we know the mappings.
     quint64 ticks = 0;
     for (const ProcInfo &info : current) {
-        const auto before = m_previous.constFind(info.id.pid);
-        if (before == m_previous.constEnd() || !(before->id == info.id) || info.cpuTicks <= before->cpuTicks)
-            continue;
-        const quint64 delta = info.cpuTicks - before->cpuTicks;
+        const quint64 delta = linuxCpuDelta(m_previous, info).value_or(0);
         if (delta >= std::numeric_limits<quint64>::max() - ticks)
             return true;
         ticks += delta;
@@ -715,13 +745,22 @@ QSet<int> ProcessMonitor::collectTreePids(int rootPid, const QHash<int, QVector<
     return seen;
 }
 
-double ProcessMonitor::processCpuPercent(const ProcInfo &before, const ProcInfo &after, double elapsedSeconds) const {
+std::optional<double> ProcessMonitor::processCpuPercent(const Snapshot &before, const ProcInfo &after,
+                                                       double elapsedSeconds) const {
 #ifdef Q_OS_WIN
     // Each process is read at a different point in the scan. Its CPU delta
     // must use the interval between its own readings, not the scan end times.
-    elapsedSeconds = double(after.sampledNs - before.sampledNs) / 1000000000.0;
+    const auto previous = before.constFind(after.id.pid);
+    if (previous == before.constEnd() || !(previous->id == after.id))
+        return std::nullopt;
+    elapsedSeconds = double(after.sampledNs - previous->sampledNs) / 1000000000.0;
+    return cpuPercent(previous->cpuTicks, after.cpuTicks, elapsedSeconds, m_cpuUnitsPerSecond);
+#else
+    const auto delta = linuxCpuDelta(before, after);
+    if (!delta)
+        return std::nullopt;
+    return cpuPercent(0, *delta, elapsedSeconds, m_cpuUnitsPerSecond);
 #endif
-    return cpuPercent(before.cpuTicks, after.cpuTicks, elapsedSeconds, m_cpuUnitsPerSecond);
 }
 
 QVector<BadProcess> ProcessMonitor::measureBadProcesses(const Snapshot &before, const Snapshot &after, double elapsedSeconds) {
@@ -813,10 +852,10 @@ QVector<BadProcess> ProcessMonitor::measureTrees(const Snapshot &before, const S
             const auto afterIt = after.constFind(pid);
             if (afterIt == after.constEnd())
                 continue;
-            const auto beforeIt = before.constFind(pid);
-            if (beforeIt == before.constEnd() || !(beforeIt->id == afterIt->id))
+            const auto memberPercent = processCpuPercent(before, *afterIt, elapsedSeconds);
+            if (!memberPercent)
                 continue;
-            percent += processCpuPercent(*beforeIt, *afterIt, elapsedSeconds);
+            percent += *memberPercent;
             members.insert(afterIt->id);
             ++counted;
         }
@@ -866,11 +905,11 @@ QVector<BadProcess> ProcessMonitor::measureLeaves(const Snapshot &before, const 
         if (process.exited || suppressedMembers.contains(process.id))
             continue;
 
-        const auto beforeIt = before.constFind(process.id.pid);
-        if (beforeIt == before.constEnd() || !(beforeIt->id == process.id))
+        const auto measured = processCpuPercent(before, process, elapsedSeconds);
+        if (!measured)
             continue;
 
-        const double percent = processCpuPercent(*beforeIt, process, elapsedSeconds);
+        const double percent = *measured;
         if (percent < m_processThresholdPercent)
             continue;
 

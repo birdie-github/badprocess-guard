@@ -9,6 +9,8 @@
 #include <QPair>
 #include <QElapsedTimer>
 
+#include <optional>
+
 struct ProcessIdentity {
     int pid = -1;
     quint64 startTime = 0;
@@ -107,6 +109,8 @@ private:
     void ignoredApplicationsChanged();
     Snapshot readSnapshot() const;
 #ifndef Q_OS_WIN
+    std::optional<quint64> bootTicks() const;
+    std::optional<quint64> linuxCpuDelta(const Snapshot &before, const ProcInfo &after) const;
     bool couldReachCpuThreshold(const Snapshot &current, double elapsedSeconds) const;
     static bool readProc(int pid, ProcInfo *info);
     static void readProcCommand(ProcInfo *info);
@@ -120,7 +124,8 @@ private:
     static QHash<int, QVector<int>> buildChildren(const Snapshot &snapshot);
     static QSet<int> collectTreePids(int rootPid, const QHash<int, QVector<int>> &children);
     QVector<BadProcess> measureBadProcesses(const Snapshot &before, const Snapshot &after, double elapsedSeconds);
-    double processCpuPercent(const ProcInfo &before, const ProcInfo &after, double elapsedSeconds) const;
+    std::optional<double> processCpuPercent(const Snapshot &before, const ProcInfo &after,
+                                            double elapsedSeconds) const;
     QVector<BadProcess> applyLinger(const QVector<BadProcess> &current, const Snapshot &snapshot,
                                   qint64 nowMs, bool honorLinger);
     void sampleInternal(bool honorLinger);
@@ -139,6 +144,9 @@ private:
     QElapsedTimer m_clock;
     Snapshot m_previous;
     qint64 m_previousNs = 0;
+#ifndef Q_OS_WIN
+    std::optional<quint64> m_previousBootTicks;
+#endif
     double m_cpuUnitsPerSecond = 100.0;
     int m_intervalMs = 5000;
     double m_treeThresholdPercent = 50.0;
