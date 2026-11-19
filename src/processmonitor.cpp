@@ -31,9 +31,9 @@
 #endif
 
 #ifdef Q_OS_WIN
-static HANDLE openProcessForQuery(DWORD pid) {
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    return process ? process : OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
+static HANDLE openProcessForQuery(DWORD pid, DWORD extraAccess = 0) {
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | extraAccess, FALSE, pid);
+    return process ? process : OpenProcess(PROCESS_QUERY_INFORMATION | extraAccess, FALSE, pid);
 }
 
 static QString processImagePath(const ProcessIdentity &id) {
@@ -362,7 +362,10 @@ ProcessMonitor::Snapshot ProcessMonitor::readSnapshot() const {
             info.ppid = static_cast<int>(entry.th32ParentProcessID);
             info.comm = QString::fromWCharArray(entry.szExeFile);
 
-            const HANDLE process = openProcessForQuery(entry.th32ProcessID);
+            HANDLE process = openProcessForQuery(entry.th32ProcessID, SYNCHRONIZE);
+            const bool canWait = process != nullptr;
+            if (!process)
+                process = openProcessForQuery(entry.th32ProcessID);
             if (!process)
                 continue;
 
@@ -372,7 +375,16 @@ ProcessMonitor::Snapshot ProcessMonitor::readSnapshot() const {
                 continue;
             }
             info.sampledNs = m_clock.nsecsElapsed();
-            info.exited = exitTime.dwLowDateTime != 0 || exitTime.dwHighDateTime != 0;
+
+            // GetProcessTimes leaves exitTime undefined for a live process.
+            const DWORD waitResult = canWait ? WaitForSingleObject(process, 0) : WAIT_FAILED;
+            info.exited = waitResult == WAIT_OBJECT_0;
+            if (waitResult == WAIT_FAILED) {
+                // Query-only access still permits CPU sampling. A status of
+                // STILL_ACTIVE is also a possible exit code, so it proves nothing.
+                DWORD exitCode;
+                info.exited = GetExitCodeProcess(process, &exitCode) && exitCode != STILL_ACTIVE;
+            }
 
             ULARGE_INTEGER ct, kt, ut;
             ct.LowPart = creationTime.dwLowDateTime;
@@ -894,19 +906,21 @@ ProcessMonitor::RunState ProcessMonitor::runState(const ProcessIdentity &id) {
     if (id.pid <= 0 || id.startTime == 0)
         return RunState::Unknown;
 #ifdef Q_OS_WIN
-    HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, DWORD(id.pid));
+    const HANDLE handle = openProcessForQuery(DWORD(id.pid), SYNCHRONIZE);
     if (!handle)
         return GetLastError() == ERROR_INVALID_PARAMETER ? RunState::Ended : RunState::Unknown;
     FILETIME creation, exit, kernel, user;
     const bool ok = GetProcessTimes(handle, &creation, &exit, &kernel, &user);
+    const DWORD waitResult = ok ? WaitForSingleObject(handle, 0) : WAIT_FAILED;
     CloseHandle(handle);
     if (!ok)
         return RunState::Unknown;
     ULARGE_INTEGER start;
     start.LowPart = creation.dwLowDateTime;
     start.HighPart = creation.dwHighDateTime;
-    return start.QuadPart == id.startTime && exit.dwLowDateTime == 0 && exit.dwHighDateTime == 0
-        ? RunState::Running : RunState::Ended;
+    if (start.QuadPart != id.startTime || waitResult == WAIT_OBJECT_0)
+        return RunState::Ended;
+    return waitResult == WAIT_TIMEOUT ? RunState::Running : RunState::Unknown;
 #else
     const QByteArray path = QStringLiteral("/proc/%1/stat").arg(id.pid).toLocal8Bit();
     const int fd = ::open(path.constData(), O_RDONLY | O_CLOEXEC);
